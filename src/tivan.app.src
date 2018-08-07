@@ -5,7 +5,8 @@
   {mod, { tivan_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    mnesia
    ]},
   {env,[]},
   {modules, []},
