@@ -1,8 +1,11 @@
 -module(tivan).
--export([add/2, put/2, get/1, get/2, get/3]).
+-export([create/2, drop/1, put/2, get/1, get/2, get/3, remove/2, update/3]).
 
-add(Table, Attributes) ->
+create(Table, Attributes) ->
   mnesia:create_table(Table, [{attributes, Attributes}]).
+
+drop(Table) ->
+  mnesia:delete_table(Table).
 
 put(Table, Row) ->
   Attributes = mnesia:table_info(Table, attributes),
@@ -33,6 +36,9 @@ get(Table, Match, Select) ->
                             fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
   SelectWithPos = select_with_position(Attributes, Select),
   objects_to_map(Objects, Attributes, SelectWithPos, Match).
+
+prepare_mnesia_select(Table, Attributes, Match) ->
+  prepare_mnesia_select(Table, Attributes, Match, []).
 
 prepare_mnesia_select(Table, Attributes, Match, Select) ->
   {MatchList, GuardList} = prepare_mnesia_select(Attributes, Match, Select, 1, [], []),
@@ -119,3 +125,50 @@ pattern_lowercase(Pattern) when is_list(Pattern) ->
   [ pattern_lowercase(X) || X <- Pattern ];
 pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
+
+remove(Table, Match) ->
+  Attributes = mnesia:table_info(Table, attributes),
+  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
+  Objects = mnesia:activity(transaction,
+                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
+  lists:foreach(
+    fun(Object) ->
+        mnesia:dirty_delete_object(Table, Object)
+    end,
+    Objects
+   ),
+  {ok, length(Objects)}.
+
+update(Table, Match, Updates) ->
+  Attributes = mnesia:table_info(Table, attributes),
+  UpdatesWithPos = lists:map(
+                     fun({Key, Value}) ->
+                        Pos = record_pos(Key, Attributes),
+                        {Pos, Value}
+                     end,
+                     maps:to_list(Updates)
+                    ),
+  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
+  Objects = mnesia:activity(transaction,
+                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
+  lists:foreach(
+    fun(Object) ->
+        ObjectU = lists:foldl(
+                    fun({Pos, Value}, ObjectA) ->
+                        setelement(Pos, ObjectA, Value)
+                    end,
+                    Object,
+                    UpdatesWithPos
+                   ),
+        mnesia:dirty_write(ObjectU)
+    end,
+    Objects
+   ),
+  {ok, length(Objects)}.
+
+record_pos(Column, Attributes) ->
+  record_pos(Column, Attributes, 2).
+
+record_pos(Column, [], _Pos) -> throw({invalid_column, Column});
+record_pos(Column, [Column|_], Pos) -> Pos;
+record_pos(Column, [_|List], Pos) -> record_pos(Column, List, Pos+1).
