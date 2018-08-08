@@ -1,11 +1,6 @@
 -module(tivan).
--export([create/2, drop/1, put/2, get/1, get/2, get/3, remove/2, update/3]).
 
-create(Table, Attributes) ->
-  mnesia:create_table(Table, [{attributes, Attributes}]).
-
-drop(Table) ->
-  mnesia:delete_table(Table).
+-export([put/2, get/1, get/2, get/3, remove/2, update/3]).
 
 put(Table, Row) ->
   Attributes = mnesia:table_info(Table, attributes),
@@ -142,9 +137,12 @@ remove(Table, Match) ->
 update(Table, Match, Updates) ->
   Attributes = mnesia:table_info(Table, attributes),
   UpdatesWithPos = lists:map(
-                     fun({Key, Value}) ->
-                        Pos = record_pos(Key, Attributes),
-                        {Pos, Value}
+                     fun({Column, Value}) ->
+                         Position = case string:str(Attributes, [Column]) of
+                                      0 -> throw({invalid_column, Column});
+                                      Pos -> Pos + 1
+                                    end,
+                        {Position, Value}
                      end,
                      maps:to_list(Updates)
                     ),
@@ -166,9 +164,3 @@ update(Table, Match, Updates) ->
    ),
   {ok, length(Objects)}.
 
-record_pos(Column, Attributes) ->
-  record_pos(Column, Attributes, 2).
-
-record_pos(Column, [], _Pos) -> throw({invalid_column, Column});
-record_pos(Column, [Column|_], Pos) -> Pos;
-record_pos(Column, [_|List], Pos) -> record_pos(Column, List, Pos+1).
