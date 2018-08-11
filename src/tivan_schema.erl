@@ -67,6 +67,7 @@ transform(Table, AttributesIndexes, DefaultValues) ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
+  init_schema(),
   {ok, #{}}.
 
 %%--------------------------------------------------------------------
@@ -150,6 +151,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+init_schema() ->
+  ok.
 
 handle_create(Table, AttributesIndexes, Options) ->
   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
