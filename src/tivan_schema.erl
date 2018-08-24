@@ -11,7 +11,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, create/2, create/3, drop/1, transform/2, transform/3]).
+-export([start_link/0,
+         create/2,
+         create/3,
+         create/4,
+         drop/1,
+         transform/2,
+         transform/3]).
 
 
 %% gen_server callbacks
@@ -37,10 +43,13 @@ start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 create(Table, Attributes) ->
-  create(Table, Attributes, []).
+  create(Table, Attributes, true, []).
 
-create(Table, AttributesIndexes, Options) ->
-  gen_server:call(?MODULE, {create, Table, AttributesIndexes, Options}).
+create(Table, AttributesIndexes, PersistFlag) ->
+  create(Table, AttributesIndexes, PersistFlag, []).
+
+create(Table, AttributesIndexes, PersistFlag, Options) ->
+  gen_server:call(?MODULE, {create, Table, AttributesIndexes, PersistFlag, Options}).
 
 drop(Table) ->
   gen_server:cast(?MODULE, {drop, Table}).
@@ -84,8 +93,8 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({create, Table, AttributesIndexes, Options}, _From, State) ->
-  Reply = handle_create(Table, AttributesIndexes, Options),
+handle_call({create, Table, AttributesIndexes, PersistFlag, Options}, _From, State) ->
+  Reply = handle_create(Table, AttributesIndexes, PersistFlag, Options),
   {reply, Reply, State};
 handle_call({transform, Table, AttributesIndexes, DefaultValues}, _From, State) ->
   Reply = handle_transform(Table, AttributesIndexes, DefaultValues),
@@ -153,11 +162,74 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 init_schema() ->
-  ok.
+  case application:get_env(tivan, remote_node, undefined) of
+    undefined ->
+      init_standalone_schema();
+    RemoteNode ->
+      case net_adm:ping(RemoteNode) of
+        pang ->
+          init_standalone_schema();
+        pong ->
+          init_cluster_schema(RemoteNode)
+      end
+  end.
 
-handle_create(Table, AttributesIndexes, Options) ->
+init_cluster_schema(RemoteNode) ->
+  MnesiaNodes = mnesia:system_info(running_db_nodes),
+  case lists:member(RemoteNode, MnesiaNodes) of
+    true ->
+      init_standalone_schema();
+    false ->
+      rpc:call(RemoteNode, mnesia, change_config,
+               [extra_db_nodes, [node()]]),
+      init_standalone_schema()
+  end.
+
+init_standalone_schema() ->
+  PersistFlag = application:get_env(tivan, persist_db, true),
+  case mnesia:table_info(schema, storage_type) of
+    disc_copies when not PersistFlag ->
+      vaporize();
+    ram_copies when PersistFlag ->
+      persist();
+    _ ->
+      ok
+  end.
+
+vaporize() ->
+  LocalTables = mnesia:system_info(local_tables) -- [schema],
+  Vaporize = fun(Table) ->
+                 case mnesia:table_info(Table, storage_type) of
+                   disc_copies ->
+                     catch mnesia:change_table_copy_type(Table, node(), ram_copies);
+                   _ ->
+                     ok
+                 end
+             end,
+  lists:map(Vaporize, LocalTables),
+  mnesia:change_table_copy_type(schema, node(), ram_copies).
+
+persist() ->
+  mnesia:change_table_copy_type(schema, node(), disc_copies).
+
+handle_create(Table, AttributesIndexes, PersistFlag, Options) ->
+  SchemaPersistFlag = application:get_env(tivan, persist_db, true),
   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
-  mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes}|Options]).
+  case catch mnesia:table_info(Table, storage_type) of
+    {'Exit', _Reason} ->
+      StorageOption = if PersistFlag, SchemaPersistFlag -> {disc_copies, [node()]};
+                         true -> {ram_copies, [node()]} end,
+      mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes},
+                                  StorageOption|Options]);
+    unknown ->
+      StorageType = if PersistFlag, SchemaPersistFlag -> disc_copies;
+                       true -> ram_copies end,
+      mnesia:add_table_copy(Table, node(), StorageType);
+    ram_copies when PersistFlag, SchemaPersistFlag ->
+      mnesia:change_table_copy_type(Table, node(), disc_copies);
+    _Other ->
+      ok
+  end.
 
 handle_drop(Table) ->
   mnesia:delete_table(Table).
