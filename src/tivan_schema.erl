@@ -216,7 +216,7 @@ handle_create(Table, AttributesIndexes, PersistFlag, Options) ->
   SchemaPersistFlag = application:get_env(tivan, persist_db, true),
   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
   case catch mnesia:table_info(Table, storage_type) of
-    {'Exit', _Reason} ->
+    {'EXIT', _Reason} ->
       StorageOption = if PersistFlag, SchemaPersistFlag -> {disc_copies, [node()]};
                          true -> {ram_copies, [node()]} end,
       mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes},
