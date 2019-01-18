@@ -222,14 +222,14 @@ handle_create(Table, AttributesIndexes, PersistFlag, Options) ->
       case mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes},
                                   StorageOption|Options]) of
         {atomic, ok} -> ok;
-        Other -> Other
+        Error -> Error
       end;
     unknown ->
       StorageType = if PersistFlag, SchemaPersistFlag -> disc_copies;
                        true -> ram_copies end,
       case mnesia:add_table_copy(Table, node(), StorageType) of
         {atomic, ok} -> ok;
-        Other -> Other
+        Error -> Error
       end;
     ram_copies when PersistFlag, SchemaPersistFlag ->
       mnesia:change_table_copy_type(Table, node(), disc_copies);
