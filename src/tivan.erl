@@ -1,5 +1,5 @@
 -module(tivan).
-%% FOR DEMO of GIT
+%% FOR DEMO of GIT - Chaitanya
 -export([put/2, get/1, get/2, get/3, remove/2, update/3]).
 
 put(Table, Row) ->
