@@ -56,6 +56,12 @@ prepare_mnesia_select([Attribute|Attributes], Match, Select, Ref, MatchList, Gua
       Guard = {OpCode, RefAtom, Value},
       prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
                             [Guard|GuardList]);
+    {ok, {range, MinValue, MaxValue}} ->
+      RefAtom = mk_ref_atom(Ref),
+      GuardA = {'>=', RefAtom, MinValue},
+      GuardB = {'=<', RefAtom, MaxValue},
+      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
+                            [GuardA, GuardB|GuardList]);
     {ok, Value} ->
       prepare_mnesia_select(Attributes, Match, Select, Ref, [Value|MatchList], GuardList)
   end.
