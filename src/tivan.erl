@@ -1,8 +1,20 @@
 -module(tivan).
-%% FOR DEMO of GIT - danny
--export([put/2, get/1, get/2, get/3, remove/2, update/3]).
+-export([put/2
+        ,put/3
+        ,get/1
+        ,get/2
+        ,get/3
+        ,get/4
+        ,remove/2
+        ,remove/3
+        ,update/3
+        ,update/4]).
 
 put(Table, Row) ->
+  WriteContext = application:get_env(tivan, write_context, transaction),
+  put(Table, Row, WriteContext).
+
+put(Table, Row, WriteContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   Record = list_to_tuple(
              [Table|
@@ -14,20 +26,33 @@ put(Table, Row) ->
                )
              ]
             ),
-  mnesia:activity(transaction, fun mnesia:write/1, [Record]).
+  mnesia:activity(WriteContext, fun mnesia:write/1, [Record]).
 
 get(Table) when is_atom(Table) ->
-  get(Table, #{}, []).
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  get(Table, #{}, [], ReadContext).
 
+get(Table, ReadContext) when is_atom(ReadContext) ->
+  get(Table, #{}, [], ReadContext);
 get(Table, Match) when is_map(Match) ->
-  get(Table, Match, []);
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  get(Table, Match, [], ReadContext);
 get(Table, Select) when is_list(Select) ->
-  get(Table, #{}, Select).
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  get(Table, #{}, Select, ReadContext).
 
-get(Table, Match, Select) ->
+get(Table, Match, Select) when is_map(Match),is_list(Select) ->
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  get(Table, Match, Select, ReadContext);
+get(Table, Match, ReadContext) when is_map(Match) ->
+  get(Table, Match, [], ReadContext);
+get(Table, Select, ReadContext) when is_list(Select) ->
+  get(Table, #{}, Select, ReadContext).
+
+get(Table, Match, Select, ReadContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
-  Objects = mnesia:activity(transaction,
+  Objects = mnesia:activity(ReadContext,
                             fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
   SelectWithPos = select_with_position(Attributes, Select),
   objects_to_map(Objects, Attributes, SelectWithPos, Match).
@@ -128,19 +153,30 @@ pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
 
 remove(Table, Match) ->
+  WriteContext = application:get_env(tivan, write_context, transaction),
+  remove(Table, Match, WriteContext).
+
+remove(Table, Match, WriteContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
-  Objects = mnesia:activity(transaction,
-                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
-  lists:foreach(
-    fun(Object) ->
-        mnesia:dirty_delete_object(Table, Object)
-    end,
-    Objects
-   ),
-  {ok, length(Objects)}.
+  RemoveFun = fun() ->
+                  Objects = mnesia:select(Table, [{MatchHead, GuardList, ['$_']}]),
+                  lists:foreach(
+                    fun(Object) ->
+                        mnesia:delete_object(Table, Object)
+                    end,
+                    Objects
+                   ),
+                  length(Objects)
+              end,
+  ObjectsCount = mnesia:activity(WriteContext, RemoveFun),
+  {ok, ObjectsCount}.
 
 update(Table, Match, Updates) ->
+  WriteContext = application:get_env(tivan, write_context, transaction),
+  update(Table, Match, Updates, WriteContext).
+
+update(Table, Match, Updates, WriteContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   UpdatesWithPos = lists:map(
                      fun({Column, Value}) ->
@@ -153,20 +189,23 @@ update(Table, Match, Updates) ->
                      maps:to_list(Updates)
                     ),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
-  Objects = mnesia:activity(transaction,
-                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
-  lists:foreach(
-    fun(Object) ->
-        ObjectU = lists:foldl(
-                    fun({Pos, Value}, ObjectA) ->
-                        setelement(Pos, ObjectA, Value)
+  UpdateFun = fun() ->
+                  Objects = mnesia:select(Table, [{MatchHead, GuardList, ['$_']}]),
+                  lists:foreach(
+                    fun(Object) ->
+                        ObjectU = lists:foldl(
+                                    fun({Pos, Value}, ObjectA) ->
+                                        setelement(Pos, ObjectA, Value)
+                                    end,
+                                    Object,
+                                    UpdatesWithPos
+                                   ),
+                        mnesia:write(ObjectU)
                     end,
-                    Object,
-                    UpdatesWithPos
+                    Objects
                    ),
-        mnesia:dirty_write(ObjectU)
-    end,
-    Objects
-   ),
-  {ok, length(Objects)}.
+                  length(Objects)
+              end,
+  ObjectsCount = mnesia:activity(WriteContext, UpdateFun),
+  {ok, ObjectsCount}.
 
