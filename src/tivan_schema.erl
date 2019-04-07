@@ -16,6 +16,7 @@
         ,create/3
         ,create/4
         ,drop/1
+        ,clear/1
         ,transform/2
         ,transform/3]).
 
@@ -53,6 +54,9 @@ create(Table, AttributesIndexes, PersistFlag, Options) ->
 
 drop(Table) ->
   gen_server:cast(?MODULE, {drop, Table}).
+
+clear(Table) ->
+  gen_server:call(?MODULE, {clear, Table}).
 
 transform(Table, AttributesIndexes) ->
   transform(Table, AttributesIndexes, #{}).
@@ -95,6 +99,9 @@ init([]) ->
 %%--------------------------------------------------------------------
 handle_call({create, Table, AttributesIndexes, PersistFlag, Options}, _From, State) ->
   Reply = handle_create(Table, AttributesIndexes, PersistFlag, Options),
+  {reply, Reply, State};
+handle_call({clear, Table}, _From, State) ->
+  Reply = handle_clear(Table),
   {reply, Reply, State};
 handle_call({transform, Table, AttributesIndexes, DefaultValues}, _From, State) ->
   Reply = handle_transform(Table, AttributesIndexes, DefaultValues),
@@ -239,6 +246,9 @@ handle_create(Table, AttributesIndexes, PersistFlag, Options) ->
 
 handle_drop(Table) ->
   mnesia:delete_table(Table).
+
+handle_clear(Table) ->
+  mnesia:clear_table(Table).
 
 handle_transform(Table, AttributesIndexes, DefaultValues) ->
   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
