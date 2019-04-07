@@ -11,22 +11,22 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0,
-         create/2,
-         create/3,
-         create/4,
-         drop/1,
-         transform/2,
-         transform/3]).
+-export([start_link/0
+        ,create/2
+        ,create/3
+        ,create/4
+        ,drop/1
+        ,transform/2
+        ,transform/3]).
 
 
 %% gen_server callbacks
--export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
+-export([init/1
+        ,handle_call/3
+        ,handle_cast/2
+        ,handle_info/2
+        ,terminate/2
+        ,code_change/3]).
 
 %%%===================================================================
 %%% API

@@ -163,7 +163,7 @@ remove(Table, Match, WriteContext) ->
                   Objects = mnesia:select(Table, [{MatchHead, GuardList, ['$_']}]),
                   lists:foreach(
                     fun(Object) ->
-                        mnesia:delete_object(Table, Object)
+                        mnesia:delete({Table, Object})
                     end,
                     Objects
                    ),
