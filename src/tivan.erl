@@ -32,6 +32,20 @@ get(Table) when is_atom(Table) ->
   ReadContext = application:get_env(tivan, read_context, transaction),
   get(Table, #{}, [], ReadContext).
 
+get(Table, Limit) when is_integer(Limit) ->
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  {_LastKey, Objects} = mnesia:activity(ReadContext, fun lists:foldl/2,
+                                        [
+                                         fun(_, {'$end_of_table', Os}) ->
+                                             {'$end_of_table', Os};
+                                            (_, {K, Os}) ->
+                                             {mnesia:next(Table), [mnesia:read(Table, K)|Os]}
+                                         end,
+                                         {mnesia:first(Table), []},
+                                         lists:seq(1, Limit)
+                                        ]),
+  Attributes = mnesia:table_info(Table, attributes),
+  objects_to_map(Objects, Attributes, [], #{});
 get(Table, ReadContext) when is_atom(ReadContext) ->
   get(Table, #{}, [], ReadContext);
 get(Table, Match) when is_map(Match) ->
