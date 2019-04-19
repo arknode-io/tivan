@@ -33,19 +33,8 @@ get(Table) when is_atom(Table) ->
   get(Table, #{}, [], ReadContext).
 
 get(Table, Limit) when is_integer(Limit) ->
-  ReadContext = application:get_env(tivan, read_context, transaction),
-  {_LastKey, Objects} = mnesia:activity(ReadContext, fun lists:foldl/2,
-                                        [
-                                         fun(_, {'$end_of_table', Os}) ->
-                                             {'$end_of_table', Os};
-                                            (_, {K, Os}) ->
-                                             {mnesia:next(Table), [mnesia:read(Table, K)|Os]}
-                                         end,
-                                         {mnesia:first(Table), []},
-                                         lists:seq(1, Limit)
-                                        ]),
-  Attributes = mnesia:table_info(Table, attributes),
-  objects_to_map(Objects, Attributes, [], #{});
+  FirstKey = mnesia:dirty_first(Table),
+  get(Table, FirstKey, Limit);
 get(Table, ReadContext) when is_atom(ReadContext) ->
   get(Table, #{}, [], ReadContext);
 get(Table, Match) when is_map(Match) ->
@@ -55,6 +44,21 @@ get(Table, Select) when is_list(Select) ->
   ReadContext = application:get_env(tivan, read_context, transaction),
   get(Table, #{}, Select, ReadContext).
 
+get(Table, StartKey, Limit) when is_integer(Limit) ->
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  ReadFunc = fun() ->
+                 (fun F(0, K, Rs) ->
+                      {K, lists:reverse(Rs)};
+                    F(_C, '$end_of_table', Rs) ->
+                      {'$end_of_table', lists:reverse(Rs)};
+                    F(C, K, Rs) ->
+                      F(C-1, mnesia:next(Table, K),
+                        mnesia:read(Table, K) ++ Rs)
+                end)(Limit, StartKey, [])
+             end,
+  {NextKey, Objects} = mnesia:activity(ReadContext, ReadFunc),
+  Attributes = mnesia:table_info(Table, attributes),
+  {NextKey, objects_to_map(Objects, Attributes, [], #{})};
 get(Table, Match, Select) when is_map(Match),is_list(Select) ->
   ReadContext = application:get_env(tivan, read_context, transaction),
   get(Table, Match, Select, ReadContext);
@@ -63,6 +67,20 @@ get(Table, Match, ReadContext) when is_map(Match) ->
 get(Table, Select, ReadContext) when is_list(Select) ->
   get(Table, #{}, Select, ReadContext).
 
+get(Table, #{'_' := Pattern} = Match, Select, ReadContext) when map_size(Match) == 1 ->
+  ReadContext = application:get_env(tivan, read_context, transaction),
+  ReadFunc = fun() ->
+                 (fun F('$end_of_table', Os) ->
+                        Os;
+                      F(K, Os) ->
+                        F(mnesia:next(Table, K),
+                          filter_objects(mnesia:read(Table, K), Pattern) ++ Os)
+                 end)(mnesia:first(Table), [])
+             end,
+  Objects = mnesia:activity(ReadContext, ReadFunc),
+  Attributes = mnesia:table_info(Table, attributes),
+  SelectWithPos = select_with_position(Attributes, Select),
+  objects_to_map(Objects, Attributes, SelectWithPos, Match);
 get(Table, Match, Select, ReadContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
@@ -118,17 +136,7 @@ select_with_position([Attribute|Attributes], Select, Pos, SelectWithPos) ->
   end.
 
 objects_to_map(Objects, Attributes, SelectWithPos, #{'_' := Pattern}) ->
-  ObjectsFiltered = lists:filter(
-                      fun(Object) ->
-                          ObjectBinLower = object_to_lowercase(Object),
-                          PatternLower = pattern_lowercase(Pattern),
-                          case binary:match(ObjectBinLower, PatternLower) of
-                            nomatch -> false;
-                            _matches -> true
-                          end
-                      end,
-                      Objects
-                     ),
+  ObjectsFiltered = filter_objects(Objects, Pattern),
   objects_to_map(ObjectsFiltered, Attributes, SelectWithPos);
 objects_to_map(Objects, Attributes, SelectWithPos, _Match) ->
   objects_to_map(Objects, Attributes, SelectWithPos).
@@ -148,6 +156,19 @@ objects_to_map(Objects, Attributes, SelectWithPos) ->
             SelectWithPos
            )
          )
+    end,
+    Objects
+   ).
+
+filter_objects(Objects, Pattern) ->
+  PatternLower = pattern_lowercase(Pattern),
+  lists:filter(
+    fun(Object) ->
+        ObjectBinLower = object_to_lowercase(Object),
+        case binary:match(ObjectBinLower, PatternLower) of
+          nomatch -> false;
+          _matches -> true
+        end
     end,
     Objects
    ).
