@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 -define(TIMEOUT, 600).
--define(OPTIONS, [ordered_set, public, compressed]).
+-define(OPTIONS, [public, compressed]).
 
 %% API
 -export([start_link/0
@@ -58,7 +58,7 @@ new(Name, Attributes) ->
       do_new(Name, Options);
     {ok, _Pid} ->
       {error, not_allowed};
-    false ->
+    error ->
       Timeout = maps:get(timeout, Attributes, ?TIMEOUT),
       gen_server:call(?MODULE, {new, Name, Options, Timeout})
   end.
@@ -83,14 +83,14 @@ get(Id, Options) ->
     Error -> Error
   end.
 
-sort(Id, Fun) ->
+sort(Id, SortArgs) ->
   case inspect(Id) of
     {?MODULE, public} ->
       gen_server:cast(?MODULE, {access, Id}),
-      do_sort(Id, Fun);
-    {_, public} -> do_sort(Id, Fun);
-    {caller, _} -> do_sort(Id, Fun);
-    {?MODULE, _} -> gen_server:call(?MODULE, {sort, Id, Fun});
+      do_sort(Id, SortArgs);
+    {_, public} -> do_sort(Id, SortArgs);
+    {caller, _} -> do_sort(Id, SortArgs);
+    {?MODULE, _} -> gen_server:call(?MODULE, {sort, Id, SortArgs});
     Error -> Error
   end.
 
@@ -153,9 +153,9 @@ handle_call({get, Id, Options}, _From, State) ->
   Reply = do_get(Id, Options),
   StateNew = State#{Id => {erlang:system_time(second), Timeout}},
   {reply, Reply, StateNew};
-handle_call({sort, Id, Fun}, _From, State) ->
+handle_call({sort, Id, SortArgs}, _From, State) ->
   {_, Timeout} = maps:get(Id, State),
-  Reply = do_sort(Id, Fun),
+  Reply = do_sort(Id, SortArgs),
   StateNew = State#{Id => {erlang:system_time(second), Timeout}},
   {reply, Reply, StateNew};
 handle_call({remove, Id}, _From, State) ->
@@ -263,7 +263,8 @@ do_put(Id, Objects) ->
     end,
     1,
     Objects
-   ).
+   ),
+  ok.
 
 do_get(Id, #{search := Pattern}) ->
   PatternLower = pattern_lowercase(Pattern),
@@ -280,7 +281,7 @@ do_get(Id, #{search := Pattern}) ->
    );
 do_get(Id, Options) ->
   Start = maps:get(start, Options, 1),
-  End = maps:get('end', Options, ets:info(Id, size)),
+  Stop = maps:get(stop, Options, ets:info(Id, size)),
   lists:foldr(
     fun(K, Os) ->
         case ets:lookup(Id, K) of
@@ -291,7 +292,7 @@ do_get(Id, Options) ->
         end
     end,
     [],
-    lists:seq(Start, End)
+    lists:seq(Start, Stop)
    ).
 
 object_to_lowercase(Object) ->
@@ -308,9 +309,32 @@ pattern_lowercase(Pattern) when is_list(Pattern) ->
 pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
 
-do_sort(Id, Fun) ->
-  ObjectsList = [ V || {_K, V} <- ets:tab2list(Id) ],
-  ObjectsListSort = lists:sort(Fun, ObjectsList),
+do_sort(Id, SortArgs) ->
+  case SortArgs of
+    Fun when is_function(Fun, 2) ->
+      ObjectsList = [ V || {_K, V} <- ets:tab2list(Id) ],
+      ObjectsListSorted = lists:sort(Fun, ObjectsList),
+      do_reload(Id, ObjectsListSorted);
+    {Key, Order} when Order == desc; Order == asc ->
+      ObjectsList = lists:map(
+                      fun({_K, #{Key := Kv} = V}) ->
+                          {Kv, V};
+                         ({_K, V}) ->
+                          {undefined, V}
+                      end,
+                      ets:tab2list(Id)
+                     ),
+      Fun = case Order of
+              desc -> fun({K1, _}, {K2, _}) -> K1 > K2 end;
+              _ -> fun({K1, _}, {K2, _}) -> K1 < K2 end
+            end,
+      ObjectsListSorted = [ V || {_, V} <- lists:sort(Fun, ObjectsList)],
+      do_reload(Id, ObjectsListSorted);
+    Other ->
+      do_sort(Id, {Other, asc})
+  end.
+
+do_reload(Id, ObjectsListSorted) ->
   ets:delete_all_objects(Id),
   lists:foldl(
     fun(O, K) ->
@@ -318,8 +342,9 @@ do_sort(Id, Fun) ->
         K + 1
     end,
     1,
-    ObjectsListSort
-   ).
+    ObjectsListSorted
+   ),
+  ok.
 
 do_remove(Id) ->
   ets:delete(Id).

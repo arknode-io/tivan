@@ -30,7 +30,8 @@ init([]) ->
   SupervisorFlags = #{strategy => one_for_one,
                       intensity => 25,
                       period => 60},
-  ChildSpecs = [?CHILD(tivan_schema)],
+  ChildSpecs = [?CHILD(tivan_schema)
+               ,?CHILD(tivan_page)],
   {ok, {SupervisorFlags, ChildSpecs}}.
 
 %%====================================================================
