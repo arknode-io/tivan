@@ -1,3 +1,11 @@
+%%%-------------------------------------------------------------------
+%%% @author danny
+%%% @copyright (C) 2019, danny
+%%% @doc
+%%%
+%%% @end
+%%% Created : 2019-04-19 18:38:31.676004
+%%%-------------------------------------------------------------------
 -module(tivan_mnesia).
 -export([put/2
         ,put/3
@@ -11,23 +19,33 @@
 
 -define(LIMIT, 10000).
 
-put(Table, Row) ->
+put(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
-  put(Table, Row, #{context => Context}).
+  put(Table, Objects, #{context => Context}).
 
-put(Table, Row, #{context := Context}) ->
+put(Table, Object, Options) when is_map(Object) ->
+  put(Table, [Object], Options);
+put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects) ->
   Attributes = mnesia:table_info(Table, attributes),
-  Record = list_to_tuple(
-             [Table|
-              lists:map(
-                fun(Attribute) ->
-                    maps:get(Attribute, Row, undefined)
-                end,
-                Attributes
-               )
-             ]
-            ),
-  mnesia:activity(Context, fun mnesia:write/1, [Record]).
+  WriteFun = fun() ->
+                 lists:foreach(
+                   fun(Object) ->
+                       Record = list_to_tuple(
+                                  [Table|
+                                   lists:map(
+                                     fun(Attribute) ->
+                                         maps:get(Attribute, Object, undefined)
+                                     end,
+                                     Attributes
+                                    )
+                                  ]
+                                 ),
+                       mnesia:write(Record)
+                   end,
+                   Objects
+                  )
+             end,
+  mnesia:activity(Context, WriteFun).
 
 get(Table) ->
   get(Table, mnesia:dirty_first(Table), ?LIMIT).
