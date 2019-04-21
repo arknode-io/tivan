@@ -13,9 +13,7 @@
         ,get/2
         ,get/3
         ,remove/2
-        ,remove/3
-        ,update/3
-        ,update/4]).
+        ,remove/3]).
 
 -define(LIMIT, 10000).
 
@@ -76,9 +74,6 @@ get(Table, Options) when is_atom(Table), is_map(Options) ->
                             fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
   SelectWithPos = select_with_position(Attributes, Select),
   objects_to_map(Objects, Attributes, SelectWithPos, Match).
-
-prepare_mnesia_select(Table, Attributes, Match) ->
-  prepare_mnesia_select(Table, Attributes, Match, []).
 
 prepare_mnesia_select(Table, Attributes, Match, Select) ->
   {MatchList, GuardList} = prepare_mnesia_select(Attributes, Match, Select, 1, [], []),
@@ -175,60 +170,20 @@ pattern_lowercase(Pattern) when is_list(Pattern) ->
 pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
 
-remove(Table, Match) ->
+remove(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
-  remove(Table, Match, #{context => Context}).
+  remove(Table, Objects, #{context => Context}).
 
-remove(Table, Match, #{context := Context}) ->
-  Attributes = mnesia:table_info(Table, attributes),
-  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
+remove(Table, Object, Options) when is_map(Object) ->
+  remove(Table, [Object], Options);
+remove(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects) ->
+  Key = hd(mnesia:table_info(Table, attributes)),
   RemoveFun = fun() ->
-                  Objects = mnesia:select(Table, [{MatchHead, GuardList, ['$_']}]),
                   lists:foreach(
-                    fun(Object) ->
-                        mnesia:delete({Table, Object})
+                    fun(#{Key := KeyValue}) ->
+                        mnesia:delete({Table, KeyValue})
                     end,
                     Objects
-                   ),
-                  length(Objects)
+                   )
               end,
-  ObjectsCount = mnesia:activity(Context, RemoveFun),
-  {ok, ObjectsCount}.
-
-update(Table, Match, Updates) ->
-  Context = application:get_env(tivan, write_context, transaction),
-  update(Table, Match, Updates, #{context => Context}).
-
-update(Table, Match, Updates, #{context := Context}) ->
-  Attributes = mnesia:table_info(Table, attributes),
-  UpdatesWithPos = lists:map(
-                     fun({Column, Value}) ->
-                         Position = case string:str(Attributes, [Column]) of
-                                      0 -> throw({invalid_column, Column});
-                                      Pos -> Pos + 1
-                                    end,
-                        {Position, Value}
-                     end,
-                     maps:to_list(Updates)
-                    ),
-  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match),
-  UpdateFun = fun() ->
-                  Objects = mnesia:select(Table, [{MatchHead, GuardList, ['$_']}]),
-                  lists:foreach(
-                    fun(Object) ->
-                        ObjectU = lists:foldl(
-                                    fun({Pos, Value}, ObjectA) ->
-                                        setelement(Pos, ObjectA, Value)
-                                    end,
-                                    Object,
-                                    UpdatesWithPos
-                                   ),
-                        mnesia:write(ObjectU)
-                    end,
-                    Objects
-                   ),
-                  length(Objects)
-              end,
-  ObjectsCount = mnesia:activity(Context, UpdateFun),
-  {ok, ObjectsCount}.
-
+  mnesia:activity(Context, RemoveFun).

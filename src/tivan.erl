@@ -13,9 +13,7 @@
         ,get/2
         ,get/3
         ,remove/2
-        ,remove/3
-        ,update/3
-        ,update/4]).
+        ,remove/3]).
 
 put(Table, ObjectOrObjects) ->
   tivan_mnesia:put(Table, ObjectOrObjects).
@@ -32,14 +30,8 @@ get(Table, Options) ->
 get(Table, StartKey, Limit) ->
   tivan_mnesia:get(Table, StartKey, Limit).
 
-remove(Table, Match) ->
-  tivan_mnesia:remove(Table, Match).
+remove(Table, ObjectOrObjects) ->
+  tivan_mnesia:remove(Table, ObjectOrObjects).
 
-remove(Table, Match, Options) ->
-  tivan_mnesia:remove(Table, Match, Options).
-
-update(Table, Match, Updates) ->
-  tivan_mnesia:update(Table, Match, Updates).
-
-update(Table, Match, Updates, Options) ->
-  tivan_mnesia:update(Table, Match, Updates, Options).
+remove(Table, ObjectOrObjects, Options) ->
+  tivan_mnesia:remove(Table, ObjectOrObjects, Options).
