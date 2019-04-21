@@ -67,20 +67,6 @@ get(Table, Match, ReadContext) when is_map(Match) ->
 get(Table, Select, ReadContext) when is_list(Select) ->
   get(Table, #{}, Select, ReadContext).
 
-get(Table, #{'_' := Pattern} = Match, Select, ReadContext) when map_size(Match) == 1 ->
-  ReadContext = application:get_env(tivan, read_context, transaction),
-  ReadFunc = fun() ->
-                 (fun F('$end_of_table', Os) ->
-                        Os;
-                      F(K, Os) ->
-                        F(mnesia:next(Table, K),
-                          filter_objects(mnesia:read(Table, K), Pattern) ++ Os)
-                 end)(mnesia:first(Table), [])
-             end,
-  Objects = mnesia:activity(ReadContext, ReadFunc),
-  Attributes = mnesia:table_info(Table, attributes),
-  SelectWithPos = select_with_position(Attributes, Select),
-  objects_to_map(Objects, Attributes, SelectWithPos, Match);
 get(Table, Match, Select, ReadContext) ->
   Attributes = mnesia:table_info(Table, attributes),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
