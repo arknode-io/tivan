@@ -12,13 +12,15 @@
 
 %% API
 -export([start_link/0
+        ,create/1
         ,create/2
-        ,create/3
-        ,create/4
         ,drop/1
         ,clear/1
-        ,transform/2
-        ,transform/3]).
+        ,info/0
+        ,info/1
+        ,info/2]).
+        % ,transform/2
+        % ,transform/3]).
 
 
 %% gen_server callbacks
@@ -43,26 +45,29 @@
 start_link() ->
   gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(Table, Attributes) ->
-  create(Table, Attributes, true, []).
+create(Table) ->
+  create(Table, #{memory => true, persist => true}).
 
-create(Table, AttributesIndexes, PersistFlag) ->
-  create(Table, AttributesIndexes, PersistFlag, []).
+create(Table, Options) when is_atom(Table), is_map(Options) ->
+  gen_server:call(?MODULE, {create, Table, Options}, 60000).
 
-create(Table, AttributesIndexes, PersistFlag, Options) ->
-  gen_server:call(?MODULE, {create, Table, AttributesIndexes, PersistFlag, Options}).
-
-drop(Table) ->
+drop(Table) when is_atom(Table) ->
   gen_server:cast(?MODULE, {drop, Table}).
 
-clear(Table) ->
+clear(Table) when is_atom(Table) ->
   gen_server:call(?MODULE, {clear, Table}).
 
-transform(Table, AttributesIndexes) ->
-  transform(Table, AttributesIndexes, #{}).
+info() -> mnesia:info().
 
-transform(Table, AttributesIndexes, DefaultValues) ->
-  gen_server:call(?MODULE, {transform, Table, AttributesIndexes, DefaultValues}).
+info(Table) -> mnesia:table_info(Table, all).
+
+info(Table, Item) -> mnesia:table_info(Table, Item).
+
+% transform(Table, AttributesIndexes) ->
+%   transform(Table, AttributesIndexes, #{}).
+
+% transform(Table, AttributesIndexes, DefaultValues) ->
+%   gen_server:call(?MODULE, {transform, Table, AttributesIndexes, DefaultValues}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -97,15 +102,15 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({create, Table, AttributesIndexes, PersistFlag, Options}, _From, State) ->
-  Reply = handle_create(Table, AttributesIndexes, PersistFlag, Options),
+handle_call({create, Table, Options}, _From, State) ->
+  Reply = do_create(Table, Options),
   {reply, Reply, State};
 handle_call({clear, Table}, _From, State) ->
   Reply = handle_clear(Table),
   {reply, Reply, State};
-handle_call({transform, Table, AttributesIndexes, DefaultValues}, _From, State) ->
-  Reply = handle_transform(Table, AttributesIndexes, DefaultValues),
-  {reply, Reply, State};
+% handle_call({transform, Table, AttributesIndexes, DefaultValues}, _From, State) ->
+%   Reply = handle_transform(Table, AttributesIndexes, DefaultValues),
+%   {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
   {reply, Reply, State}.
@@ -219,65 +224,38 @@ vaporize() ->
 persist() ->
   mnesia:change_table_copy_type(schema, node(), disc_copies).
 
-handle_create(Table, AttributesIndexes, PersistFlag, Options) ->
+do_create(Table, Options) ->
   SchemaPersistFlag = application:get_env(tivan, persist_db, true),
-  {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
+  MnesiaOptions = maps:get(mnesia_options, Options, []),
+  {Attributes, Indexes} = get_attributes_indexes(Options),
+  Memory = maps:get(memory, Options, true),
+  Persist = maps:get(persist, Options, true),
+  StorageType = if Memory, Persist, SchemaPersistFlag -> disc_copies;
+                   Persist, SchemaPersistFlag -> leveldb_copies;
+                   Memory -> ram_copies end,
   case catch mnesia:table_info(Table, storage_type) of
     {'EXIT', _Reason} ->
-      StorageOption = if PersistFlag, SchemaPersistFlag -> {disc_copies, [node()]};
-                         true -> {ram_copies, [node()]} end,
       case mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes},
-                                  StorageOption|Options]) of
+                                       {StorageType, [node()]}|MnesiaOptions]) of
         {atomic, ok} -> ok;
         Error -> Error
       end;
     unknown ->
-      StorageType = if PersistFlag, SchemaPersistFlag -> disc_copies;
-                       true -> ram_copies end,
       case mnesia:add_table_copy(Table, node(), StorageType) of
         {atomic, ok} -> ok;
         Error -> Error
       end;
-    ram_copies when PersistFlag, SchemaPersistFlag ->
-      mnesia:change_table_copy_type(Table, node(), disc_copies);
+    StorageType ->
+      ok;
     _Other ->
-      ok
-  end.
-
-handle_drop(Table) ->
-  mnesia:delete_table(Table).
-
-handle_clear(Table) ->
-  mnesia:clear_table(Table).
-
-handle_transform(Table, AttributesIndexes, DefaultValues) ->
-  {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
-  AttributesNow = mnesia:table_info(Table, attributes),
-  IndexesNow = [ lists:nth(X-1, AttributesNow) || X <- mnesia:table_info(Table, index) ],
-  [ mnesia:del_table_index(Table, Index) || Index <- IndexesNow -- Indexes ],
-  if
-    Attributes == AttributesNow -> ok;
-    true ->
-      Transfun = transform_function(Table, AttributesNow, Attributes, DefaultValues),
-      mnesia:transform_table(Table, Transfun, Attributes)
+      case mnesia:change_table_copy_type(Table, node(), StorageType) of
+        {atomic, ok} -> ok;
+        Error -> Error
+      end
   end,
-  [ mnesia:add_table_index(Table, Index) || Index <- Indexes -- IndexesNow ].
+  mnesia:wait_for_tables([Table], 50000).
 
-transform_function(Table, AttributesNow, Attributes, DefaultValues) ->
-  fun(Row) ->
-      RowU = lists:map(
-               fun(Column) ->
-                   case string:str(AttributesNow, [Column]) of
-                     0 -> maps:get(Column, DefaultValues, undefined);
-                     Pos -> element(Pos + 1, Row)
-                   end
-               end,
-               Attributes
-              ),
-      list_to_tuple([Table|RowU])
-  end.
-
-get_attributes_indexes(AttributesIndexes) ->
+get_attributes_indexes(#{columns := AttributesIndexes}) ->
   lists:foldr(
     fun({Attribute}, {AttributesAcc, IndexesAcc}) ->
         {[Attribute|AttributesAcc], [Attribute|IndexesAcc]};
@@ -286,5 +264,41 @@ get_attributes_indexes(AttributesIndexes) ->
     end,
     {[], []},
     AttributesIndexes
-   ).
+   );
+get_attributes_indexes(_Other) ->
+  {[key, value], []}.
+
+handle_drop(Table) ->
+  mnesia:delete_table(Table).
+
+handle_clear(Table) ->
+  mnesia:clear_table(Table).
+
+% handle_transform(Table, AttributesIndexes, DefaultValues) ->
+%   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
+%   AttributesNow = mnesia:table_info(Table, attributes),
+%   IndexesNow = [ lists:nth(X-1, AttributesNow) || X <- mnesia:table_info(Table, index) ],
+%   [ mnesia:del_table_index(Table, Index) || Index <- IndexesNow -- Indexes ],
+%   if
+%     Attributes == AttributesNow -> ok;
+%     true ->
+%       Transfun = transform_function(Table, AttributesNow, Attributes, DefaultValues),
+%       mnesia:transform_table(Table, Transfun, Attributes)
+%   end,
+%   [ mnesia:add_table_index(Table, Index) || Index <- Indexes -- IndexesNow ].
+
+% transform_function(Table, AttributesNow, Attributes, DefaultValues) ->
+%   fun(Row) ->
+%       RowU = lists:map(
+%                fun(Column) ->
+%                    case string:str(AttributesNow, [Column]) of
+%                      0 -> maps:get(Column, DefaultValues, undefined);
+%                      Pos -> element(Pos + 1, Row)
+%                    end
+%                end,
+%                Attributes
+%               ),
+%       list_to_tuple([Table|RowU])
+%   end.
+
 
