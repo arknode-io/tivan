@@ -245,7 +245,11 @@ do_create(Table, Options) ->
         {atomic, ok} -> ok;
         Error -> Error
       end;
+    {ext,leveldb_copies,mnesia_eleveldb} ->
+      ok;
     StorageType ->
+      ok;
+    _Other when StorageType == leveldb_copies ->
       ok;
     _Other ->
       case mnesia:change_table_copy_type(Table, node(), StorageType) of
