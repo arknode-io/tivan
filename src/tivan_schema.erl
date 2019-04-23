@@ -19,9 +19,6 @@
         ,info/0
         ,info/1
         ,info/2]).
-        % ,transform/2
-        % ,transform/3]).
-
 
 %% gen_server callbacks
 -export([init/1
@@ -62,12 +59,6 @@ info() -> mnesia:info().
 info(Table) -> mnesia:table_info(Table, all).
 
 info(Table, Item) -> mnesia:table_info(Table, Item).
-
-% transform(Table, AttributesIndexes) ->
-%   transform(Table, AttributesIndexes, #{}).
-
-% transform(Table, AttributesIndexes, DefaultValues) ->
-%   gen_server:call(?MODULE, {transform, Table, AttributesIndexes, DefaultValues}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -277,32 +268,4 @@ handle_drop(Table) ->
 
 handle_clear(Table) ->
   mnesia:clear_table(Table).
-
-% handle_transform(Table, AttributesIndexes, DefaultValues) ->
-%   {Attributes, Indexes} = get_attributes_indexes(AttributesIndexes),
-%   AttributesNow = mnesia:table_info(Table, attributes),
-%   IndexesNow = [ lists:nth(X-1, AttributesNow) || X <- mnesia:table_info(Table, index) ],
-%   [ mnesia:del_table_index(Table, Index) || Index <- IndexesNow -- Indexes ],
-%   if
-%     Attributes == AttributesNow -> ok;
-%     true ->
-%       Transfun = transform_function(Table, AttributesNow, Attributes, DefaultValues),
-%       mnesia:transform_table(Table, Transfun, Attributes)
-%   end,
-%   [ mnesia:add_table_index(Table, Index) || Index <- Indexes -- IndexesNow ].
-
-% transform_function(Table, AttributesNow, Attributes, DefaultValues) ->
-%   fun(Row) ->
-%       RowU = lists:map(
-%                fun(Column) ->
-%                    case string:str(AttributesNow, [Column]) of
-%                      0 -> maps:get(Column, DefaultValues, undefined);
-%                      Pos -> element(Pos + 1, Row)
-%                    end
-%                end,
-%                Attributes
-%               ),
-%       list_to_tuple([Table|RowU])
-%   end.
-
 
