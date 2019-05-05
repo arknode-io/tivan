@@ -38,7 +38,8 @@ put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects)
                                     )
                                   ]
                                  ),
-                       mnesia:write(Record)
+                       mnesia:write(Record),
+                       {ok, element(2, Record)}
                    end,
                    Objects
                   )
@@ -49,7 +50,7 @@ get(Table) ->
   get(Table, mnesia:dirty_first(Table), ?LIMIT).
 
 get(Table, StartKey, Limit) when is_atom(Table), is_integer(Limit) ->
-  Context = application:get_env(tivan, read_context, transaction),
+  Context = application:get_env(tivan, read_context, async_dirty),
   ReadFunc = fun() ->
                  (fun F(0, K, Rs) ->
                       {K, lists:reverse(Rs)};
@@ -67,13 +68,18 @@ get(Table, StartKey, Limit) when is_atom(Table), is_integer(Limit) ->
 get(Table, Options) when is_atom(Table), is_map(Options) ->
   Match = maps:get(match, Options, #{}),
   Select = maps:get(select, Options, []),
-  Context = maps:get(context, Options, application:get_env(tivan, read_context, transaction)),
+  Context = maps:get(context, Options, application:get_env(tivan, read_context, async_dirty)),
   Attributes = mnesia:table_info(Table, attributes),
   {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
   Objects = mnesia:activity(Context,
                             fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
   SelectWithPos = select_with_position(Attributes, Select),
-  objects_to_map(Objects, Attributes, SelectWithPos, Match).
+  objects_to_map(Objects, Attributes, SelectWithPos, Match);
+get(Table, Key) when is_atom(Table) ->
+  Context = application:get_env(tivan, read_context, async_dirty),
+  Attributes = mnesia:table_info(Table, attributes),
+  Objects = mnesia:activity(Context, fun mnesia:read/2, [Table, Key]),
+  objects_to_map(Objects, Attributes, [], #{}).
 
 prepare_mnesia_select(Table, Attributes, Match, Select) ->
   {MatchList, GuardList} = prepare_mnesia_select(Attributes, Match, Select, 1, [], []),

@@ -221,12 +221,13 @@ do_create(Table, Options) ->
   {Attributes, Indexes} = get_attributes_indexes(Options),
   Memory = maps:get(memory, Options, true),
   Persist = maps:get(persist, Options, true),
+  Type = maps:get(type, Options, set),
   StorageType = if Memory, Persist, SchemaPersistFlag -> disc_copies;
                    Persist, SchemaPersistFlag -> leveldb_copies;
                    Memory -> ram_copies end,
   case catch mnesia:table_info(Table, storage_type) of
     {'EXIT', _Reason} ->
-      case mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes},
+      case mnesia:create_table(Table, [{attributes, Attributes}, {index, Indexes}, {type, Type},
                                        {StorageType, [node()]}|MnesiaOptions]) of
         {atomic, ok} -> ok;
         Error -> Error

@@ -15,7 +15,15 @@
  {<<"proper">>,
   {git,"https://github.com/manopapad/proper.git",
        {ref,"44f85e6129a4742f085766109fd0e7549ca4ba86"}},
-  1}]}.
+  1},
+ {<<"quickrand">>,
+  {git,"https://github.com/okeuday/quickrand.git",
+       {ref,"6f3d611c04e1cd734e8287b358f0f458b4f88662"}},
+  1},
+ {<<"uuid">>,
+  {git,"https://github.com/okeuday/uuid.git",
+       {ref,"fd20692d4fd6b72db029208dbc0e1a41b35de641"}},
+  0}]}.
 [
 {pkg_hash,[
  {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>}]}
