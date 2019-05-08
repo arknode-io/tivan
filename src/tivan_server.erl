@@ -391,6 +391,11 @@ validate_limit(Value, tuple, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, map, Size) when is_integer(Size) -> map_size(Value) =< Size;
 validate_limit(Value, list, Size) when is_integer(Size) -> length(Value) =< Size;
 validate_limit(Value, integer, Size) when is_integer(Size) -> Value =< Size;
+validate_limit(Value, binary, {re, RegExp}) when is_binary(Value) ->
+  case re:run(Value, RegExp) of
+    nomatch -> false;
+    {match, _} -> true
+  end;
 validate_limit(Value, binary, {Min, Max}) when is_integer(Min),is_integer(Max) ->
   Size = size(Value),
   (Size >= Min) and (Size =< Max);
