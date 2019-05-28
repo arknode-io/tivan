@@ -102,10 +102,44 @@ prepare_mnesia_select([Attribute|Attributes], Match, Select, Ref, MatchList, Gua
       Guard = {OpCode, RefAtom, Value},
       prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
                             [Guard|GuardList]);
+    {ok, {Pos, Size, eval, OpCode, Value}} when is_integer(Pos), is_integer(Size), Pos =< Size,
+                                                is_atom(OpCode) ->
+      RefAtom = mk_ref_atom(Ref),
+      RefTuple = erlang:make_tuple(Size, '_', [{Pos, RefAtom}]),
+      Guard = {OpCode, RefAtom, Value},
+      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefTuple|MatchList],
+                            [Guard|GuardList]);
     {ok, {range, MinValue, MaxValue}} ->
       RefAtom = mk_ref_atom(Ref),
       GuardA = {'>=', RefAtom, MinValue},
       GuardB = {'=<', RefAtom, MaxValue},
+      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
+                            [GuardA, GuardB|GuardList]);
+    {ok, {Pos, Size, range, MinValue, MaxValue}} when is_integer(Pos), is_integer(Size),
+                                                      Pos =< Size ->
+      RefAtom = mk_ref_atom(Ref),
+      RefTuple = erlang:make_tuple(Size, '_', [{Pos, RefAtom}]),
+      GuardA = {'>=', RefAtom, MinValue},
+      GuardB = {'=<', RefAtom, MaxValue},
+      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefTuple|MatchList],
+                            [GuardA, GuardB|GuardList]);
+    {ok, {Pos, Size, Pre}} when is_integer(Pos),is_integer(Size),is_binary(Pre)
+                               andalso binary_part(Pre, {byte_size(Pre), -3}) == <<"...">> ->
+      RefAtom = mk_ref_atom(Ref),
+      RefTuple = erlang:make_tuple(Size, '_', [{Pos, RefAtom}]),
+      StartsWith = binary_part(Pre, {0, byte_size(Pre)-3}),
+      GuardA = {'>=', RefAtom, StartsWith},
+      GuardB = {'=<', RefAtom, << StartsWith/binary, 255 >>},
+      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefTuple|MatchList],
+                            [GuardA, GuardB|GuardList]);
+    {ok, {Pos, Size, Value}} when is_integer(Pos),is_integer(Size) ->
+      RefTuple = erlang:make_tuple(Size, '_', [{Pos, Value}]),
+      prepare_mnesia_select(Attributes, Match, Select, Ref, [RefTuple|MatchList], GuardList);
+    {ok, Pre} when is_binary(Pre) andalso binary_part(Pre, {byte_size(Pre), -3}) == <<"...">> ->
+      RefAtom = mk_ref_atom(Ref),
+      StartsWith = binary_part(Pre, {0, byte_size(Pre)-3}),
+      GuardA = {'>=', RefAtom, StartsWith},
+      GuardB = {'=<', RefAtom, << StartsWith/binary, 255 >>},
       prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
                             [GuardA, GuardB|GuardList]);
     {ok, Value} ->

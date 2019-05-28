@@ -43,7 +43,12 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Registration, Callback, Arguments, Options) ->
-  gen_server:start_link(Registration, ?MODULE, [Callback|Arguments], Options).
+  Server = case Registration of
+             {local, Name} -> Name;
+             {global, GlobalName} -> GlobalName;
+             {via, _Module, ViaName} -> ViaName
+           end,
+  gen_server:start_link(Registration, ?MODULE, [Callback, Server|Arguments], Options).
 
 drop(Server, Table) ->
   gen_server:cast(Server, {drop, Table}).
@@ -52,21 +57,24 @@ table_defs(Server) ->
   gen_server:call(Server, table_defs).
 
 put(Server, Table, Object) ->
-  TableDefs = table_defs(Server),
+  % TableDefs = table_defs(Server),
+  TableDefs = persistent_term:get({Server, table_defs}),
   do_put(Table, Object, TableDefs).
 
 put_s(Server, Table, Object) ->
   gen_server:call(Server, {put, Table, Object}).
 
 get(Server, Table, Options) ->
-  TableDefs = table_defs(Server),
+  % TableDefs = table_defs(Server),
+  TableDefs = persistent_term:get({Server, table_defs}),
   do_get(Table, Options, TableDefs).
 
 get_s(Server, Table, Options) ->
   gen_server:call(Server, {get, Table, Options}).
 
 remove(Server, Table, Object) ->
-  TableDefs = table_defs(Server),
+  % TableDefs = table_defs(Server),
+  TableDefs = persistent_term:get({Server, table_defs}),
   do_remove(Table, Object, TableDefs).
 
 remove_s(Server, Table, Object) ->
@@ -87,11 +95,12 @@ remove_s(Server, Table, Object) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Callback|Arguments]) ->
+init([Callback, Server|Arguments]) ->
   case Callback:init(Arguments) of
     {ok, TableDefs} ->
       TableDefsU = process_tabledefs(TableDefs),
-      {ok, #{callback => Callback, table_defs => TableDefsU}};
+      persistent_term:put({Server, table_defs}, TableDefs),
+      {ok, #{callback => Callback, server => Server, table_defs => TableDefsU}};
     Other ->
       Other
   end.
@@ -132,10 +141,11 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({drop, Table}, #{table_defs := TableDefs} = State) ->
+handle_cast({drop, Table}, #{table_defs := TableDefs, server := Server} = State) ->
   tivan:drop(Table),
-  StateU = State#{table_defs => maps:remove(Table, TableDefs)},
-  {noreply, StateU};
+  TableDefsU = maps:remove(Table, TableDefs),
+  persistent_term:put({Server, table_defs}, TableDefsU),
+  {noreply, State#{table_defs => TableDefsU}};
 handle_cast({remove, Table, Object}, #{table_defs := TableDefs} = State) ->
   do_remove(Table, Object, TableDefs),
   {noreply, State};
