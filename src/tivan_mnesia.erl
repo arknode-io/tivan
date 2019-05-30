@@ -85,13 +85,19 @@ get(Table, Options) when is_atom(Table), is_map(Options) ->
                                     [Table, [{MatchHead, GuardList, ['$_']}]]),
           objects_to_map(Objects, Attributes, SelectWithPos, Match);
         {ok, Limit} ->
-          {Objects, C} = mnesia:activity(Context, fun mnesia:select/4,
-                                         [Table, [{MatchHead, GuardList, ['$_']}], Limit, read]),
-          {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+          case mnesia:activity(Context, fun mnesia:select/4,
+                               [Table, [{MatchHead, GuardList, ['$_']}], Limit, read])of
+            '$end_of_table' -> {'$end_of_table', []};
+            {Objects, C} ->
+              {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+          end
       end;
     {ok, Cont} ->
-      {Objects, C} = mnesia:activity(Context, fun mnesia:select/1, [Cont]),
-      {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+      case mnesia:activity(Context, fun mnesia:select/1, [Cont]) of
+        '$end_of_table' -> {'$end_of_table', []};
+        {Objects, C} ->
+          {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+      end
   end;
 get(Table, Key) when is_atom(Table) ->
   Context = application:get_env(tivan, read_context, async_dirty),
