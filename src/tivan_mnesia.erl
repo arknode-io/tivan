@@ -11,11 +11,10 @@
         ,put/3
         ,get/1
         ,get/2
-        ,get/3
         ,remove/2
         ,remove/3]).
 
--define(LIMIT, 10000).
+-define(LIMIT, 1000).
 
 put(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
@@ -47,34 +46,53 @@ put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects)
   mnesia:activity(Context, WriteFun).
 
 get(Table) ->
-  get(Table, mnesia:dirty_first(Table), ?LIMIT).
+  Limit = application:get_env(tivan, default_rows_limit, ?LIMIT),
+  get(Table, #{limit => Limit}).
 
-get(Table, StartKey, Limit) when is_atom(Table), is_integer(Limit) ->
+get(Table, #{limit := Limit} = Options) when map_size(Options) == 1 ->
+  get(Table, #{start_key => mnesia:dirty_first(Table), limit => Limit});
+get(Table, #{start_key := StartKey} = Options) when map_size(Options) == 1 ->
+  Limit = application:get_env(tivan, default_rows_limit, ?LIMIT),
+  get(Table, #{start_key => StartKey, limit => Limit});
+get(Table, #{start_key := StartKey, limit := Limit}) when is_atom(Table), is_integer(Limit) ->
   Context = application:get_env(tivan, read_context, async_dirty),
-  ReadFunc = fun() ->
-                 (fun F(0, K, Rs) ->
-                      {K, lists:reverse(Rs)};
-                    F(_C, '$end_of_table', Rs) ->
-                      {'$end_of_table', lists:reverse(Rs)};
-                    F(C, K, Rs) ->
-                      F(C-1, mnesia:next(Table, K),
-                        mnesia:read(Table, K) ++ Rs)
-                end)(Limit, StartKey, [])
-             end,
-  {NextKey, Objects} = mnesia:activity(Context, ReadFunc),
+  GetFunc = fun() ->
+                {NKey, Objs} = lists:foldl(
+                                 fun(_C, {'$end_of_table', Rs}) ->
+                                     {'$end_of_table', Rs};
+                                    (_C, {K, Rs}) ->
+                                     {mnesia:next(Table, K), mnesia:read(Table, K) ++ Rs}
+                                 end,
+                                 {StartKey, []},
+                                 lists:seq(1, Limit)),
+                {NKey, lists:reverse(Objs)}
+            end,
+  {NextKey, Objects} = mnesia:activity(Context, GetFunc),
   Attributes = mnesia:table_info(Table, attributes),
-  {NextKey, objects_to_map(Objects, Attributes, [], #{})}.
-
+  {NextKey, objects_to_map(Objects, Attributes, [], #{})};
 get(Table, Options) when is_atom(Table), is_map(Options) ->
   Match = maps:get(match, Options, #{}),
   Select = maps:get(select, Options, []),
   Context = maps:get(context, Options, application:get_env(tivan, read_context, async_dirty)),
   Attributes = mnesia:table_info(Table, attributes),
-  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
-  Objects = mnesia:activity(Context,
-                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
   SelectWithPos = select_with_position(Attributes, Select),
-  objects_to_map(Objects, Attributes, SelectWithPos, Match);
+  case maps:find(cont, Options) of
+    error ->
+      {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
+      case maps:find(limit, Options) of
+        error ->
+          Objects = mnesia:activity(Context, fun mnesia:select/2,
+                                    [Table, [{MatchHead, GuardList, ['$_']}]]),
+          objects_to_map(Objects, Attributes, SelectWithPos, Match);
+        {ok, Limit} ->
+          {Objects, C} = mnesia:activity(Context, fun mnesia:select/4,
+                                         [Table, [{MatchHead, GuardList, ['$_']}], Limit, read]),
+          {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+      end;
+    {ok, Cont} ->
+      {Objects, C} = mnesia:activity(Context, fun mnesia:select/1, [Cont]),
+      {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
+  end;
 get(Table, Key) when is_atom(Table) ->
   Context = application:get_env(tivan, read_context, async_dirty),
   Attributes = mnesia:table_info(Table, attributes),
