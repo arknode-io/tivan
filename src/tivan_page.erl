@@ -314,7 +314,7 @@ do_sort(Id, SortArgs) ->
     Fun when is_function(Fun, 2) ->
       ObjectsList = [ V || {_K, V} <- ets:tab2list(Id) ],
       ObjectsListSorted = lists:sort(Fun, ObjectsList),
-      do_reload(Id, ObjectsListSorted);
+      reload(Id, ObjectsListSorted);
     {Key, Order} when Order == desc; Order == asc ->
       ObjectsList = lists:map(
                       fun({_K, #{Key := Kv} = V}) ->
@@ -329,12 +329,12 @@ do_sort(Id, SortArgs) ->
               _ -> fun({K1, _}, {K2, _}) -> K1 < K2 end
             end,
       ObjectsListSorted = [ V || {_, V} <- lists:sort(Fun, ObjectsList)],
-      do_reload(Id, ObjectsListSorted);
+      reload(Id, ObjectsListSorted);
     Other ->
       do_sort(Id, {Other, asc})
   end.
 
-do_reload(Id, ObjectsListSorted) ->
+reload(Id, ObjectsListSorted) ->
   ets:delete_all_objects(Id),
   lists:foldl(
     fun(O, K) ->
