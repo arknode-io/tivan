@@ -99,7 +99,7 @@ init([Callback, Server|Arguments]) ->
   case Callback:init(Arguments) of
     {ok, TableDefs} ->
       TableDefsU = process_tabledefs(TableDefs),
-      persistent_term:put({Server, table_defs}, TableDefs),
+      persistent_term:put({Server, table_defs}, TableDefsU),
       {ok, #{callback => Callback, server => Server, table_defs => TableDefsU}};
     Other ->
       Other
@@ -282,7 +282,7 @@ update_key_curr_object(Object, Table, #{columns := Columns, key := Key} = TableD
   TableType = maps:get(type, TableDef, set),
   case maps:find(Key, Object) of
     error when KeyType == uuid ->
-      Value = uuid:get_v4(),
+      Value = list_to_binary(uuid:uuid_to_string(uuid:get_v4())),
       Object#{Key => Value};
     {ok, Value} when TableType /= bag ->
       case tivan:get(Table, Value) of
@@ -342,23 +342,26 @@ validate_unique(Value, Column, #{unique := true}, Table, Key, KeyValue) ->
   end;
 validate_unique(_Value, _Column, _ColumnDef, _Table, _Key, _KeyValue) -> ok.
 
+validate_value(undefined, _ColumnDef) -> ok;
 validate_value(Value, ColumnDef) ->
   Type = maps:get(type, ColumnDef, binary),
   case validate_type(Value, Type) of
     true ->
-      Limit = maps:get(limit, ColumnDef, undefined),
-      case validate_limit(Value, Type, Limit) of
-        true ->
-          ok;
-        false ->
-          limit_failed
+      case maps:get(limit, ColumnDef, undefined) of
+        undefined -> ok;
+        Limit ->
+          case validate_limit(Value, Type, Limit) of
+            true ->
+              ok;
+            false ->
+              limit_failed
+          end
       end;
     false ->
       type_failed
   end.
 
-validate_type(undefined, _Type) -> true;
-validate_type(Value, uuid) -> uuid:is_v4(Value);
+validate_type(Value, uuid) -> uuid:is_v4(uuid:string_to_uuid(binary_to_list(Value)));
 validate_type(Value, binary) -> is_binary(Value);
 validate_type(Value, list) -> is_list(Value);
 validate_type(Value, tuple) -> is_tuple(Value);
@@ -395,7 +398,6 @@ validate_type(Value, Table) when is_atom(Table) ->
   end;
 validate_type(_Value, _Type) -> false.
 
-validate_limit(_Value, _Type, undefined) -> true;
 validate_limit(Value, binary, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, tuple, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, map, Size) when is_integer(Size) -> map_size(Value) =< Size;

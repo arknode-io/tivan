@@ -21,11 +21,12 @@ put(Table, Objects) ->
   put(Table, Objects, #{context => Context}).
 
 put(Table, Object, Options) when is_map(Object) ->
-  put(Table, [Object], Options);
+  [Key] = put(Table, [Object], Options),
+  Key;
 put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects) ->
   Attributes = mnesia:table_info(Table, attributes),
   WriteFun = fun() ->
-                 lists:foreach(
+                 lists:map(
                    fun(Object) ->
                        Record = list_to_tuple(
                                   [Table|
@@ -38,7 +39,7 @@ put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects)
                                   ]
                                  ),
                        mnesia:write(Record),
-                       {ok, element(2, Record)}
+                       element(2, Record)
                    end,
                    Objects
                   )
