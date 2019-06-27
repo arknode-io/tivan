@@ -302,7 +302,7 @@ update_audit(Object, _TableDef) -> Object.
 validate(Object, Table, #{columns := Columns, key := Key} = TableDef) ->
   case validate(Object, Table, Key, maps:iterator(Columns)) of
     {ok, ObjectU} ->
-      UniqueComboList = maps:find(unique_combo, TableDef),
+      UniqueComboList = maps:get(unique_combo, TableDef, []),
       case validate_unique_combo(Object, Table, Key, UniqueComboList) of
         ok -> {ok, ObjectU};
         error -> {error, already_exists}
