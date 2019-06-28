@@ -208,6 +208,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%             ,persist => true | false
 %%             ,type => set |ordered_set | bag
 %%             ,audit => false | true
+%%             ,unique_combo => [] | [{column1, column2}, {... },... ]
 %%             ,read_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
 %%             ,write_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
 %%             ,mnesia_options => [] | OtherMnesiaOptions}}
@@ -298,8 +299,17 @@ update_audit(Object, #{audit := true}) ->
          ,a_mtime => Now};
 update_audit(Object, _TableDef) -> Object.
 
-validate(Object, Table, #{columns := Columns, key := Key}) ->
-  validate(Object, Table, Key, maps:iterator(Columns)).
+validate(Object, Table, #{columns := Columns, key := Key} = TableDef) ->
+  case validate(Object, Table, Key, maps:iterator(Columns)) of
+    {ok, ObjectU} ->
+      UniqueComboList = maps:get(unique_combo, TableDef, []),
+      case validate_unique_combo(Object, Table, Key, UniqueComboList) of
+        ok -> {ok, ObjectU};
+        error -> {error, already_exists}
+      end;
+    Error ->
+      Error
+  end.
 
 validate(Object, Table, Key, ColumnsIter) ->
   case maps:next(ColumnsIter) of
@@ -424,6 +434,23 @@ validate_limit(Value, integer, {Min, Max}) when is_integer(Min),is_integer(Max) 
   (Value >= Min) and (Value =< Max);
 validate_limit(Value, _Type, List) when is_list(List) -> lists:member(Value, List);
 validate_limit(_Value, _Type, _Limit) -> true.
+
+validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
+  KeyValue = maps:get(Key, Object, undefined),
+  ColumnValueMap = lists:foldl(
+                     fun(Column, CVMap) ->
+                         CVMap#{Column => maps:get(Column, Object, undefined)}
+                     end,
+                     #{},
+                     tuple_to_list(ComboTuple)
+                    ),
+  case tivan:get(Table, #{match => ColumnValueMap#{Key => {eval, '/=', KeyValue}}}) of
+    [] ->
+      validate_unique_combo(Object, Table, Key, UniqueComboList);
+    _ ->
+      error
+  end;
+validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
 do_get(Table, Options, TableDefs) ->
   case maps:find(Table, TableDefs) of
