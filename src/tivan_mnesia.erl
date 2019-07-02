@@ -212,7 +212,8 @@ filter_objects(Objects, Pattern) ->
   PatternLower = pattern_lowercase(Pattern),
   lists:filter(
     fun(Object) ->
-        ObjectBinLower = object_to_lowercase(Object),
+        ObjectWithoutUndefined = [ X || X <- tuple_to_list(Object), X /= undefined ],
+        ObjectBinLower = object_to_lowercase(ObjectWithoutUndefined),
         case binary:match(ObjectBinLower, PatternLower) of
           nomatch -> false;
           _matches -> true
