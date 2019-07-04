@@ -285,6 +285,9 @@ update_key_curr_object(Object, Table, #{columns := Columns, key := Key} = TableD
     error when KeyType == uuid ->
       Value = list_to_binary(uuid:uuid_to_string(uuid:get_v4())),
       Object#{Key => Value};
+    {ok, undefined} when KeyType == uuid ->
+      Value = list_to_binary(uuid:uuid_to_string(uuid:get_v4())),
+      Object#{Key => Value};
     {ok, Value} when TableType /= bag ->
       case tivan:get(Table, Value) of
         [] -> Object;
