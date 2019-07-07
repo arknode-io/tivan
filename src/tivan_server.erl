@@ -285,6 +285,9 @@ update_key_curr_object(Object, Table, #{columns := Columns, key := Key} = TableD
     error when KeyType == uuid ->
       Value = list_to_binary(uuid:uuid_to_string(uuid:get_v4())),
       Object#{Key => Value};
+    {ok, undefined} when KeyType == uuid ->
+      Value = list_to_binary(uuid:uuid_to_string(uuid:get_v4())),
+      Object#{Key => Value};
     {ok, Value} when TableType /= bag ->
       case tivan:get(Table, Value) of
         [] -> Object;
@@ -323,7 +326,7 @@ validate(Object, Table, Key, ColumnsIter) ->
             error ->
               {error, {Column, already_exists}};
             ok ->
-              case validate_value(Value, ColumnDef) of
+              case validate_value(Value, ColumnDef, Table, Key, KeyValue) of
                 ok ->
                   validate(Object#{Column => Value}, Table, Key, ColumnsIterU);
                 Error ->
@@ -352,10 +355,10 @@ validate_unique(Value, Column, #{unique := true}, Table, Key, KeyValue) ->
   end;
 validate_unique(_Value, _Column, _ColumnDef, _Table, _Key, _KeyValue) -> ok.
 
-validate_value(undefined, _ColumnDef) -> ok;
-validate_value(Value, ColumnDef) ->
+validate_value(undefined, _ColumnDef, _Table, _Key, _KeyValue) -> ok;
+validate_value(Value, ColumnDef, Table, Key, KeyValue) ->
   Type = maps:get(type, ColumnDef, binary),
-  case validate_type(Value, Type) of
+  case validate_type(Value, Type, Table, Key, KeyValue) of
     true ->
       case maps:get(limit, ColumnDef, undefined) of
         undefined -> ok;
@@ -371,42 +374,52 @@ validate_value(Value, ColumnDef) ->
       type_failed
   end.
 
-validate_type(Value, uuid) -> uuid:is_v4(uuid:string_to_uuid(binary_to_list(Value)));
-validate_type(Value, binary) -> is_binary(Value);
-validate_type(Value, list) -> is_list(Value);
-validate_type(Value, tuple) -> is_tuple(Value);
-validate_type(Value, boolean) -> is_boolean(Value);
-validate_type(Value, atom) -> is_atom(Value);
-validate_type(Value, integer) -> is_integer(Value);
-validate_type(Value, float) -> is_float(Value);
-validate_type(Value, map) -> is_map(Value);
-validate_type(Values, [{Table, Field}]) when is_list(Values) ->
+validate_type(Value, uuid, _Table, _Key, _KeyValue) ->
+  uuid:is_v4(uuid:string_to_uuid(binary_to_list(Value)));
+validate_type(Value, binary, _Table, _Key, _KeyValue) ->
+  is_binary(Value);
+validate_type(Value, list, _Table, _Key, _KeyValue) ->
+  is_list(Value);
+validate_type(Value, tuple, _Table, _Key, _KeyValue) ->
+  is_tuple(Value);
+validate_type(Value, boolean, _Table, _Key, _KeyValue) ->
+  is_boolean(Value);
+validate_type(Value, atom, _Table, _Key, _KeyValue) ->
+  is_atom(Value);
+validate_type(Value, integer, _Table, _Key, _KeyValue) ->
+  is_integer(Value);
+validate_type(Value, float, _Table, _Key, _KeyValue) ->
+  is_float(Value);
+validate_type(Value, map, _Table, _Key, _KeyValue) ->
+  is_map(Value);
+validate_type(Values, [{Table, Field}], _Table, _Key, _KeyValue) when is_list(Values) ->
   lists:all(
     fun(Value) ->
-        validate_type(Value, {Table, Field})
+        validate_type(Value, {Table, Field}, _Table, _Key, _KeyValue)
     end,
     Values
    );
-validate_type(Value, {Table, Field}) when is_atom(Table), is_atom(Field) ->
+validate_type(Value, {Table, Field}, _Table, _Key, _KeyValue) when is_atom(Table), is_atom(Field) ->
   case catch tivan:get(Table, #{match => #{Field => Value}}) of
     {'EXIT', _Reason} -> false;
     [] -> false;
     _ -> true
   end;
-validate_type(Values, [Table]) when is_list(Values) ->
+validate_type(Values, [Table], _Table, _Key, _KeyValue) when is_list(Values) ->
   lists:all(
     fun(Value) ->
-        validate_type(Value, Table)
+        validate_type(Value, Table, _Table, _Key, _KeyValue)
     end,
     Values
    );
-validate_type(Value, Table) when is_atom(Table) ->
+validate_type(Value, Table, Table, _Key, Value) -> false;
+validate_type(Value, Table, _Table, _Key, _KeyValue) when is_atom(Table) ->
   case catch tivan:get(Table, Value) of
     {'EXIT', _Reason} -> false;
     [] -> false;
     _ -> true
   end;
-validate_type(_Value, _Type) -> false.
+validate_type(_Value, _Type, _Table, _Key, _KeyValue) -> false.
 
 validate_limit(Value, binary, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, tuple, Size) when is_integer(Size) -> size(Value) =< Size;
