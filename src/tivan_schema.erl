@@ -278,11 +278,11 @@ wait_for_tables(Tables, Time) ->
 transform_if_needed(Table, Attributes, Indexes, Options) ->
   lager:info("Transform if needed for ~p", [{Table, Attributes, Indexes, Options}]),
   TransformFlag = maps:get(transform, Options, true),
-  IndexesExisting = [ lists:nth(X-1, Attributes)
-                      || X <- mnesia:table_info(Table, index) ],
   case mnesia:table_info(Table, attributes) of
     Attributes ->
       lager:info("The attributes are the same so no need to transform ~p", [Attributes]),
+      IndexesExisting = [ lists:nth(X-1, Attributes)
+                          || X <- mnesia:table_info(Table, index) ],
       IndexesToDelete = IndexesExisting -- Indexes,
       IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesToDelete ],
       lager:info("Deleting ~p indexes and response is ~p", [IndexesToDelete, IDRes]),
@@ -295,6 +295,8 @@ transform_if_needed(Table, Attributes, Indexes, Options) ->
     AttributesExisting ->
       lager:info("The attributes are different ~p vs ~p.Thus initiating table transform"
                 ,[AttributesExisting, Attributes]),
+      IndexesExisting = [ lists:nth(X-1, AttributesExisting)
+                          || X <- mnesia:table_info(Table, index) ],
       lager:info("First dropping all additional indexes ~p", [IndexesExisting]),
       IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesExisting ],
       lager:info("All additional indexes drop response ~p", [IDRes]),
