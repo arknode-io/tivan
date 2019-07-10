@@ -99,9 +99,6 @@ handle_call({create, Table, Options}, _From, State) ->
 handle_call({clear, Table}, _From, State) ->
   Reply = handle_clear(Table),
   {reply, Reply, State};
-% handle_call({transform, Table, AttributesIndexes, DefaultValues}, _From, State) ->
-%   Reply = handle_transform(Table, AttributesIndexes, DefaultValues),
-%   {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
   {reply, Reply, State}.
@@ -249,7 +246,8 @@ do_create(Table, Options) ->
         Error -> Error
       end
   end,
-  mnesia:wait_for_tables([Table], 50000).
+  wait_for_tables([Table], 50000),
+  transform_if_needed(Table, Attributes, Indexes, Options).
 
 get_attributes_indexes(#{columns := AttributesIndexes}) ->
   lists:foldr(
@@ -263,6 +261,69 @@ get_attributes_indexes(#{columns := AttributesIndexes}) ->
    );
 get_attributes_indexes(_Other) ->
   {[key, value], []}.
+
+wait_for_tables(Tables, Time) ->
+  lager:info("Waiting for tables ~p for ~p milliseconds", [Tables, Time]),
+  case mnesia:wait_for_tables(Tables, Time) of
+    {timeout, TablesToLoad} ->
+      lager:info("Tables still loading ~p", [TablesToLoad]),
+      TimeToWait = if Time > 5000 -> Time div 2; true -> Time end,
+      wait_for_tables(TablesToLoad, TimeToWait);
+    {error, Reason} ->
+      lager:error("Failed to load ~p", [Reason]);
+    ok ->
+      lager:info("Completed loading tables.")
+  end.
+
+transform_if_needed(Table, Attributes, Indexes, Options) ->
+  TransformFlag = maps:get(transform, Options, true),
+  case mnesia:table_info(Table, attributes) of
+    Attributes ->
+      lager:info("The attributes are the same so no need to transform ~p", [Attributes]),
+      IndexesExisting = [ lists:nth(X-1, Attributes)
+                          || X <- mnesia:table_info(Table, index) ],
+      reindex_if_needed(Table, IndexesExisting, Indexes);
+    AttributesExisting when not TransformFlag ->
+      lager:error("The attributes are different but transform flag not set ~p vs ~p"
+                ,[AttributesExisting, Attributes]),
+      IndexesExisting = [ lists:nth(X-1, AttributesExisting)
+                          || X <- mnesia:table_info(Table, index) ],
+      reindex_if_needed(Table, IndexesExisting, Indexes);
+    AttributesExisting ->
+      lager:info("The attributes are different ~p vs ~p.Thus initiating table transform"
+                ,[AttributesExisting, Attributes]),
+      IndexesExisting = [ lists:nth(X-1, AttributesExisting)
+                          || X <- mnesia:table_info(Table, index) ],
+      lager:info("First dropping all additional indexes ~p", [IndexesExisting]),
+      IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesExisting ],
+      lager:info("All additional indexes drop response ~p", [IDRes]),
+      TransformFun = transform_function(Table, AttributesExisting, Attributes),
+      TRes = mnesia:transform_table(Table, TransformFun, Attributes),
+      lager:info("Transform table response ~p", [TRes]),
+      IARes = [ mnesia:add_table_index(Table, Index) || Index <- Indexes ],
+      lager:info("Creating ~p Indexes and response is ~p", [Indexes, IARes])
+  end.
+
+reindex_if_needed(Table, IndexesExisting, Indexes) ->
+  IndexesToDelete = IndexesExisting -- Indexes,
+  IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesToDelete ],
+  lager:info("Deleting ~p indexes and response is ~p", [IndexesToDelete, IDRes]),
+  IndexesToAdd = Indexes -- IndexesExisting,
+  IARes = [ mnesia:add_table_index(Table, Index) || Index <- IndexesToAdd ],
+  lager:info("Adding ~p Indexes and response is ~p", [IndexesToAdd, IARes]).
+
+transform_function(Table, AttributesExisting, Attributes) ->
+  fun(Row) ->
+      list_to_tuple([Table|lists:map(
+                             fun(Field) ->
+                                 case string:str(AttributesExisting, [Field]) of
+                                   0 -> undefined;
+                                   P -> element(P + 1, Row)
+                                 end
+                             end,
+                             Attributes
+                            )])
+  end.
 
 handle_drop(Table) ->
   mnesia:delete_table(Table).

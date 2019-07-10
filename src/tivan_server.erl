@@ -21,7 +21,8 @@
         ,get/3
         ,get_s/3
         ,remove/3
-        ,remove_s/3]).
+        ,remove_s/3
+        ,initialize/1]).
 
 %% gen_server callbacks
 -export([init/1
@@ -80,6 +81,9 @@ remove(Server, Table, Object) ->
 remove_s(Server, Table, Object) ->
   gen_server:cast(Server, {remove, Table, Object}).
 
+initialize(Server) ->
+  gen_server:cast(Server, initialize).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -98,9 +102,10 @@ remove_s(Server, Table, Object) ->
 init([Callback, Server|Arguments]) ->
   case Callback:init(Arguments) of
     {ok, TableDefs} ->
-      TableDefsU = process_tabledefs(TableDefs),
+      TableDefsU = init_tables(TableDefs),
       persistent_term:put({Server, table_defs}, TableDefsU),
-      {ok, #{callback => Callback, server => Server, table_defs => TableDefsU}};
+      {ok, #{callback => Callback, init_args => Arguments
+            ,server => Server, table_defs => TableDefsU}};
     Other ->
       Other
   end.
@@ -149,6 +154,15 @@ handle_cast({drop, Table}, #{table_defs := TableDefs, server := Server} = State)
 handle_cast({remove, Table, Object}, #{table_defs := TableDefs} = State) ->
   do_remove(Table, Object, TableDefs),
   {noreply, State};
+handle_cast(initialize, #{callback := Callback
+                         ,server := Server
+                         ,init_args := Arguments} = State) ->
+  case init([Callback, Server|Arguments]) of
+    {ok, NewState} ->
+      {noreply, NewState};
+    {stop, Reason} ->
+      {stop, Reason, State}
+  end;
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
@@ -215,7 +229,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%     ** The first option is the default **
 %%--------------------------------------------------------------------
 
-process_tabledefs(TableDefs) ->
+init_tables(TableDefs) ->
   maps:map(
     fun(Table, TableDef) ->
         TableDefU = process_tabledef(TableDef),
@@ -360,15 +374,12 @@ validate_value(Value, ColumnDef, Table, Key, KeyValue) ->
   Type = maps:get(type, ColumnDef, binary),
   case validate_type(Value, Type, Table, Key, KeyValue) of
     true ->
-      case maps:get(limit, ColumnDef, undefined) of
-        undefined -> ok;
-        Limit ->
-          case validate_limit(Value, Type, Limit) of
-            true ->
-              ok;
-            false ->
-              limit_failed
-          end
+      Limit = maps:get(limit, ColumnDef, undefined),
+      case validate_limit(Value, Type, Limit) of
+        true ->
+          ok;
+        false ->
+          limit_failed
       end;
     false ->
       type_failed
@@ -421,6 +432,7 @@ validate_type(Value, Table, _Table, _Key, _KeyValue) when is_atom(Table) ->
   end;
 validate_type(_Value, _Type, _Table, _Key, _KeyValue) -> false.
 
+validate_limit(_Value, _Type, undefined) -> ok;
 validate_limit(Value, binary, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, tuple, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, map, Size) when is_integer(Size) -> map_size(Value) =< Size;
