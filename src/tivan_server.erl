@@ -264,7 +264,17 @@ init_table(Table, #{columns := ColumnsWithDef} = TableDef) ->
                   maps:remove(Key, ColumnsWithDef)
                  ),
   Columns = [Key|lists:sort(ColumnsRest)],
-  tivan:create(Table, TableDef#{columns => Columns}).
+  Defaults = maps:fold(
+               fun(Column, ColumnDef, DefaultsAcc) ->
+                   case maps:find(default, ColumnDef) of
+                     error -> DefaultsAcc;
+                     {ok, Value} -> DefaultsAcc#{Column => Value}
+                   end
+               end,
+               #{},
+               ColumnsWithDef
+              ),
+  tivan:create(Table, TableDef#{columns => Columns, defaults => Defaults}).
 
 get_key(Columns) when is_map(Columns) -> get_key(maps:to_list(Columns));
 get_key([{Column, #{key := true} = ColumnDef}|_Columns]) -> {Column, ColumnDef};
