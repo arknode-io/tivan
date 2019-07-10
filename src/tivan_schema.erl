@@ -276,6 +276,7 @@ wait_for_tables(Tables, Time) ->
   end.
 
 transform_if_needed(Table, Attributes, Indexes, Options) ->
+  lager:info("Transform if needed for ~p", [{Table, Attributes, Indexes, Options}]),
   TransformFlag = maps:get(transform, Options, true),
   IndexesExisting = [ lists:nth(X-1, Attributes)
                       || X <- mnesia:table_info(Table, index) ],

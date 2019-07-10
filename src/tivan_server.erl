@@ -274,6 +274,7 @@ init_table(Table, #{columns := ColumnsWithDef} = TableDef) ->
                #{},
                ColumnsWithDef
               ),
+  lager:info("Initiaing creation of ~p", [TableDef, Columns, Defaults]),
   tivan:create(Table, TableDef#{columns => Columns, defaults => Defaults}).
 
 get_key(Columns) when is_map(Columns) -> get_key(maps:to_list(Columns));
