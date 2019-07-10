@@ -277,47 +277,40 @@ wait_for_tables(Tables, Time) ->
 
 transform_if_needed(Table, Attributes, Indexes, Options) ->
   TransformFlag = maps:get(transform, Options, true),
+  IndexesExisting = [ lists:nth(X-1, Attributes)
+                      || X <- mnesia:table_info(Table, index) ],
   case mnesia:table_info(Table, attributes) of
     Attributes ->
       lager:info("The attributes are the same so no need to transform ~p", [Attributes]),
-      IndexesExisting = [ lists:nth(X-1, Attributes)
-                          || X <- mnesia:table_info(Table, index) ],
-      reindex_if_needed(Table, IndexesExisting, Indexes);
+      IndexesToDelete = IndexesExisting -- Indexes,
+      IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesToDelete ],
+      lager:info("Deleting ~p indexes and response is ~p", [IndexesToDelete, IDRes]),
+      IndexesToAdd = Indexes -- IndexesExisting,
+      IARes = [ mnesia:add_table_index(Table, Index) || Index <- IndexesToAdd ],
+      lager:info("Adding ~p Indexes and response is ~p", [IndexesToAdd, IARes]);
     AttributesExisting when not TransformFlag ->
-      lager:error("The attributes are different but transform flag not set ~p vs ~p"
-                ,[AttributesExisting, Attributes]),
-      IndexesExisting = [ lists:nth(X-1, AttributesExisting)
-                          || X <- mnesia:table_info(Table, index) ],
-      reindex_if_needed(Table, IndexesExisting, Indexes);
+      lager:error("The attributes are different ~p vs ~p.BUT transform flag not set."
+                ,[AttributesExisting, Attributes]);
     AttributesExisting ->
       lager:info("The attributes are different ~p vs ~p.Thus initiating table transform"
                 ,[AttributesExisting, Attributes]),
-      IndexesExisting = [ lists:nth(X-1, AttributesExisting)
-                          || X <- mnesia:table_info(Table, index) ],
       lager:info("First dropping all additional indexes ~p", [IndexesExisting]),
       IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesExisting ],
       lager:info("All additional indexes drop response ~p", [IDRes]),
-      TransformFun = transform_function(Table, AttributesExisting, Attributes),
+      Defaults = maps:get(defaults, Options, #{}),
+      TransformFun = transform_function(Table, AttributesExisting, Attributes, Defaults),
       TRes = mnesia:transform_table(Table, TransformFun, Attributes),
       lager:info("Transform table response ~p", [TRes]),
       IARes = [ mnesia:add_table_index(Table, Index) || Index <- Indexes ],
       lager:info("Creating ~p Indexes and response is ~p", [Indexes, IARes])
   end.
 
-reindex_if_needed(Table, IndexesExisting, Indexes) ->
-  IndexesToDelete = IndexesExisting -- Indexes,
-  IDRes = [ mnesia:del_table_index(Table, Index) || Index <- IndexesToDelete ],
-  lager:info("Deleting ~p indexes and response is ~p", [IndexesToDelete, IDRes]),
-  IndexesToAdd = Indexes -- IndexesExisting,
-  IARes = [ mnesia:add_table_index(Table, Index) || Index <- IndexesToAdd ],
-  lager:info("Adding ~p Indexes and response is ~p", [IndexesToAdd, IARes]).
-
-transform_function(Table, AttributesExisting, Attributes) ->
+transform_function(Table, AttributesExisting, Attributes, Defaults) ->
   fun(Row) ->
       list_to_tuple([Table|lists:map(
                              fun(Field) ->
                                  case string:str(AttributesExisting, [Field]) of
-                                   0 -> undefined;
+                                   0 -> maps:get(Field, Defaults, undefined);
                                    P -> element(P + 1, Row)
                                  end
                              end,
