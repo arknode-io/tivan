@@ -443,7 +443,7 @@ validate_type(Value, Table, _Table, _Key, _KeyValue) when is_atom(Table) ->
   end;
 validate_type(_Value, _Type, _Table, _Key, _KeyValue) -> false.
 
-validate_limit(_Value, _Type, undefined) -> ok;
+validate_limit(_Value, _Type, undefined) -> true;
 validate_limit(Value, binary, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, tuple, Size) when is_integer(Size) -> size(Value) =< Size;
 validate_limit(Value, map, Size) when is_integer(Size) -> map_size(Value) =< Size;
