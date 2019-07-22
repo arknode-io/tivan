@@ -58,6 +58,8 @@ info() -> mnesia:info().
 
 info(Table) -> mnesia:table_info(Table, all).
 
+info(Table, ItemList) when is_list(ItemList) ->
+  [ {Item, info(Table, Item)} || Item <- ItemList ];
 info(Table, Item) -> mnesia:table_info(Table, Item).
 
 %%%===================================================================
