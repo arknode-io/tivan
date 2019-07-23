@@ -323,7 +323,7 @@ update_key_curr_object(Object, Table, #{columns := Columns, key := Key} = TableD
 
 update_audit(Object, #{audit := true}) ->
   Now = erlang:system_time(millisecond),
-  Object#{a_ctime => maps:get(ctime, Object, Now)
+  Object#{a_ctime => maps:get(a_ctime, Object, Now)
          ,a_mtime => Now};
 update_audit(Object, _TableDef) -> Object.
 
