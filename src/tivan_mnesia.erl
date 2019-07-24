@@ -240,16 +240,18 @@ remove(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
   remove(Table, Objects, #{context => Context}).
 
-remove(Table, Object, Options) when is_map(Object) ->
-  remove(Table, [Object], Options);
 remove(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects) ->
   Key = hd(mnesia:table_info(Table, attributes)),
   RemoveFun = fun() ->
                   lists:foreach(
                     fun(#{Key := KeyValue}) ->
+                        mnesia:delete({Table, KeyValue});
+                       (KeyValue) ->
                         mnesia:delete({Table, KeyValue})
                     end,
                     Objects
                    )
               end,
-  mnesia:activity(Context, RemoveFun).
+  mnesia:activity(Context, RemoveFun);
+remove(Table, ObjectOrKey, Options) ->
+  remove(Table, [ObjectOrKey], Options).
