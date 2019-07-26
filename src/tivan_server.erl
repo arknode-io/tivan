@@ -488,22 +488,24 @@ validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
   end;
 validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
-do_get(Table, Options, TableDefs) ->
+do_get(Table, #{match := _} = Options, TableDefs) ->
   case maps:find(Table, TableDefs) of
-    error ->
-      {error, no_definition};
     {ok, #{read_context := Context}} ->
       tivan:get(Table, Options#{context => Context});
-    {ok, _} ->
+    _ ->
       tivan:get(Table, Options)
-  end.
+  end;
+do_get(Table, Options, TableDefs) when is_map(Options) ->
+  do_get(Table, #{match => Options}, TableDefs);
+do_get(Table, Key, _TableDefs) ->
+  tivan:get(Table, Key).
 
-do_remove(Table, Object, TableDefs) ->
+do_remove(Table, Object, TableDefs) when is_map(Object) ->
   case maps:find(Table, TableDefs) of
-    error ->
-      {error, no_definition};
     {ok, #{write_context := Context}} ->
       tivan:remove(Table, Object, #{context => Context});
-    {ok, _} ->
+    _ ->
       tivan:remove(Table, Object)
-  end.
+  end;
+do_remove(Table, Key, _TableDef) ->
+  tivan:remove(Table, Key).
