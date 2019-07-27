@@ -11,6 +11,7 @@
         ,create/2
         ,drop/1
         ,clear/1
+        ,is_local/1
         ,info/0
         ,info/1
         ,info/2
@@ -33,6 +34,9 @@ drop(Table) ->
 
 clear(Table) ->
   tivan_schema:clear(Table).
+
+is_local(Table) ->
+  tivan_schema:is_local(Table).
 
 info() ->
   tivan_schema:info().
