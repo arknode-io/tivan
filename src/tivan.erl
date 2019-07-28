@@ -20,6 +20,7 @@
         ,get/1
         ,get/2
         ,get/3
+        ,get_last_key/1
         ,remove/2
         ,remove/3]).
 
@@ -61,6 +62,9 @@ get(Table, Options) ->
 
 get(Table, StartKey, Limit) ->
   tivan_mnesia:get(Table, StartKey, Limit).
+
+get_last_key(Table) ->
+  tivan_mnesia:get_last_key(Table).
 
 remove(Table, ObjectOrObjects) ->
   tivan_mnesia:remove(Table, ObjectOrObjects).
