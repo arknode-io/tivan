@@ -16,6 +16,7 @@
         ,create/2
         ,drop/1
         ,clear/1
+        ,is_local/1
         ,info/0
         ,info/1
         ,info/2]).
@@ -53,6 +54,9 @@ drop(Table) when is_atom(Table) ->
 
 clear(Table) when is_atom(Table) ->
   gen_server:call(?MODULE, {clear, Table}).
+
+is_local(Table) ->
+  lists:member(Table, mnesia:system_info(local_tables)).
 
 info() -> mnesia:info().
 
