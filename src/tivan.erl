@@ -11,6 +11,7 @@
         ,create/2
         ,drop/1
         ,clear/1
+        ,is_local/1
         ,info/0
         ,info/1
         ,info/2
@@ -19,6 +20,7 @@
         ,get/1
         ,get/2
         ,get/3
+        ,get_last_key/1
         ,remove/2
         ,remove/3]).
 
@@ -33,6 +35,9 @@ drop(Table) ->
 
 clear(Table) ->
   tivan_schema:clear(Table).
+
+is_local(Table) ->
+  tivan_schema:is_local(Table).
 
 info() ->
   tivan_schema:info().
@@ -57,6 +62,9 @@ get(Table, Options) ->
 
 get(Table, StartKey, Limit) ->
   tivan_mnesia:get(Table, StartKey, Limit).
+
+get_last_key(Table) ->
+  tivan_mnesia:get_last_key(Table).
 
 remove(Table, ObjectOrObjects) ->
   tivan_mnesia:remove(Table, ObjectOrObjects).

@@ -11,6 +11,7 @@
         ,put/3
         ,get/1
         ,get/2
+        ,get_last_key/1
         ,remove/2
         ,remove/3]).
 
@@ -235,6 +236,10 @@ pattern_lowercase(Pattern) when is_list(Pattern) ->
   [ pattern_lowercase(X) || X <- Pattern ];
 pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
+
+get_last_key(Table) ->
+  Context = application:get_env(tivan, read_context, async_dirty),
+  mnesia:activity(Context, fun mnesia:last/1, [Table]).
 
 remove(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
