@@ -286,17 +286,18 @@ do_put(Table, Object, TableDefs) ->
   case maps:find(Table, TableDefs) of
     error ->
       {error, no_definition};
-    {ok, TableDef} ->
+    {ok, #{key := Key} = TableDef} ->
       ObjectWithKey = update_key_curr_object(Object, Table, TableDef),
       ObjectWithAudit = update_audit(ObjectWithKey, TableDef),
       case validate(ObjectWithAudit, Table, TableDef) of
         {ok, ObjectValidated} ->
-          case maps:find(write_context, TableDef) of
-            error ->
-              tivan:put(Table, ObjectValidated);
-            {ok, Context} ->
-              tivan:put(Table, ObjectValidated, #{context => Context})
-          end;
+          KeyValue = case maps:find(write_context, TableDef) of
+                       error ->
+                         tivan:put(Table, ObjectValidated);
+                       {ok, Context} ->
+                         tivan:put(Table, ObjectValidated, #{context => Context})
+                     end,
+          #{Key => KeyValue};
         Error ->
           Error
       end
