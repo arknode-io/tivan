@@ -12,7 +12,6 @@
    ]},
   {env,[]},
   {modules, []},
-  {maintainers, ["cchalasani@me.com"]},
   {licenses, ["Apache 2.0"]},
   {links, [{"GitHub", "https://github.com/arknode-io/tivan.git"}]}
  ]}.
