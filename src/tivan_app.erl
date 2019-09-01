@@ -15,7 +15,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-  mnesia_eleveldb:register(),
+  mnesia_rocksdb:register(),
   tivan_sup:start_link().
 
 %%--------------------------------------------------------------------

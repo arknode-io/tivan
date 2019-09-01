@@ -7,7 +7,7 @@
    [kernel,
     stdlib,
     mnesia,
-    mnesia_eleveldb,
+    mnesia_rocksdb,
     lager
    ]},
   {env,[]},
