@@ -1,6 +1,6 @@
 {application, tivan,
- [{description, "An OTP application"},
-  {vsn, "0.1.0"},
+ [{description, "Wrapper for mnesia with loaded functionality"},
+  {vsn, "1.0"},
   {registered, []},
   {mod, { tivan_app, []}},
   {applications,
@@ -12,8 +12,7 @@
    ]},
   {env,[]},
   {modules, []},
-
-  {maintainers, []},
+  {maintainers, ["cchalasani@me.com"]},
   {licenses, ["Apache 2.0"]},
-  {links, []}
+  {links, [{"GitHub", "https://github.com/arknode-io/tivan.git"}]}
  ]}.
