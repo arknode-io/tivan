@@ -1,121 +1,73 @@
+%%%-------------------------------------------------------------------
+%%% @author danny
+%%% @copyright (C) 2019, danny
+%%% @doc
+%%%
+%%% @end
+%%% Created : 2019-04-19 18:38:31.676004
+%%%-------------------------------------------------------------------
 -module(tivan).
--export([add/2, put/2, get/1, get/2, get/3]).
+-export([create/1
+        ,create/2
+        ,drop/1
+        ,clear/1
+        ,is_local/1
+        ,info/0
+        ,info/1
+        ,info/2
+        ,put/2
+        ,put/3
+        ,get/1
+        ,get/2
+        ,get/3
+        ,get_last_key/1
+        ,remove/2
+        ,remove/3]).
 
-add(Table, Attributes) ->
-  mnesia:create_table(Table, [{attributes, Attributes}]).
+create(Table) ->
+  tivan_schema:create(Table).
 
-put(Table, Row) ->
-  Attributes = mnesia:table_info(Table, attributes),
-  Record = list_to_tuple(
-             [Table|
-              lists:map(
-                fun(Attribute) ->
-                    maps:get(Attribute, Row, undefined)
-                end,
-                Attributes
-               )
-             ]
-            ),
-  mnesia:activity(transaction, fun mnesia:write/1, [Record]).
+create(Table, Options) ->
+  tivan_schema:create(Table, Options).
 
-get(Table) when is_atom(Table) ->
-  get(Table, #{}, []).
+drop(Table) ->
+  tivan_schema:drop(Table).
 
-get(Table, Match) when is_map(Match) ->
-  get(Table, Match, []);
-get(Table, Select) when is_list(Select) ->
-  get(Table, #{}, Select).
+clear(Table) ->
+  tivan_schema:clear(Table).
 
-get(Table, Match, Select) ->
-  Attributes = mnesia:table_info(Table, attributes),
-  {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
-  Objects = mnesia:activity(transaction,
-                            fun mnesia:select/2, [Table, [{MatchHead, GuardList, ['$_']}]]),
-  SelectWithPos = select_with_position(Attributes, Select),
-  objects_to_map(Objects, Attributes, SelectWithPos, Match).
+is_local(Table) ->
+  tivan_schema:is_local(Table).
 
-prepare_mnesia_select(Table, Attributes, Match, Select) ->
-  {MatchList, GuardList} = prepare_mnesia_select(Attributes, Match, Select, 1, [], []),
-  {list_to_tuple([Table|MatchList]), GuardList}.
+info() ->
+  tivan_schema:info().
 
-prepare_mnesia_select([], _Match, _Select, _Ref, MatchList, GuardList) ->
-  {lists:reverse(MatchList), GuardList};
-prepare_mnesia_select([Attribute|Attributes], Match, Select, Ref, MatchList, GuardList) ->
-  case maps:find(Attribute, Match) of
-    error ->
-      case lists:member(Attribute, Select) of
-        false ->
-          prepare_mnesia_select(Attributes, Match, Select, Ref, ['_'|MatchList], GuardList);
-        true ->
-          RefAtom = mk_ref_atom(Ref),
-          prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList], GuardList)
-      end;
-    {ok, {eval, OpCode, Value}} when is_atom(OpCode) ->
-      RefAtom = mk_ref_atom(Ref),
-      Guard = {OpCode, RefAtom, Value},
-      prepare_mnesia_select(Attributes, Match, Select, Ref + 1, [RefAtom|MatchList],
-                            [Guard|GuardList]);
-    {ok, Value} ->
-      prepare_mnesia_select(Attributes, Match, Select, Ref, [Value|MatchList], GuardList)
-  end.
+info(Table) ->
+  tivan_schema:info(Table).
 
-mk_ref_atom(Ref) -> list_to_atom([$$|integer_to_list(Ref)]).
+info(Table, Item) ->
+  tivan_schema:info(Table, Item).
 
-select_with_position(Attributes, Select) ->
-  select_with_position(Attributes, Select, 2, []).
+put(Table, ObjectOrObjects) ->
+  tivan_mnesia:put(Table, ObjectOrObjects).
 
-select_with_position([], _Select, _Pos, SelectWithPos) -> lists:reverse(SelectWithPos);
-select_with_position([Attribute|Attributes], Select, Pos, SelectWithPos) ->
-  case lists:member(Attribute, Select) of
-    false -> select_with_position(Attributes, Select, Pos + 1 , SelectWithPos);
-    true -> select_with_position(Attributes, Select, Pos + 1 , [{Pos, Attribute}|SelectWithPos])
-  end.
+put(Table, ObjectOrObjects, Options) ->
+  tivan_mnesia:put(Table, ObjectOrObjects, Options).
 
-objects_to_map(Objects, Attributes, SelectWithPos, #{'_' := Pattern}) ->
-  ObjectsFiltered = lists:filter(
-                      fun(Object) ->
-                          ObjectBinLower = object_to_lowercase(Object),
-                          PatternLower = pattern_lowercase(Pattern),
-                          case binary:match(ObjectBinLower, PatternLower) of
-                            nomatch -> false;
-                            _matches -> true
-                          end
-                      end,
-                      Objects
-                     ),
-  objects_to_map(ObjectsFiltered, Attributes, SelectWithPos);
-objects_to_map(Objects, Attributes, SelectWithPos, _Match) ->
-  objects_to_map(Objects, Attributes, SelectWithPos).
+get(Table) ->
+  tivan_mnesia:get(Table).
 
-objects_to_map(Objects, Attributes, SelectWithPos) ->
-  lists:map(
-    fun(Object) when SelectWithPos == [] ->
-        maps:from_list(
-          lists:zip(Attributes, tl(tuple_to_list(Object)))
-         );
-       (Object) ->
-        maps:from_list(
-          lists:map(
-            fun({Pos, Attribute}) ->
-                {Attribute, element(Pos, Object)}
-            end,
-            SelectWithPos
-           )
-         )
-    end,
-    Objects
-   ).
+get(Table, Options) ->
+  tivan_mnesia:get(Table, Options).
 
-object_to_lowercase(Object) ->
-  list_to_binary(
-    string:lowercase(
-      lists:flatten(
-        io_lib:format("~p", [Object])
-       )
-     )
-   ).
+get(Table, StartKey, Limit) ->
+  tivan_mnesia:get(Table, StartKey, Limit).
 
-pattern_lowercase(Pattern) when is_list(Pattern) ->
-  [ pattern_lowercase(X) || X <- Pattern ];
-pattern_lowercase(Pattern) when is_binary(Pattern) ->
-  string:lowercase(Pattern).
+get_last_key(Table) ->
+  tivan_mnesia:get_last_key(Table).
+
+remove(Table, ObjectOrObjects) ->
+  tivan_mnesia:remove(Table, ObjectOrObjects).
+
+remove(Table, ObjectOrObjects, Options) ->
+  tivan_mnesia:remove(Table, ObjectOrObjects, Options).

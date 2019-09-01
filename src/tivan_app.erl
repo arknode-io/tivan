@@ -15,7 +15,8 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    tivan_sup:start_link().
+  mnesia_eleveldb:register(),
+  tivan_sup:start_link().
 
 %%--------------------------------------------------------------------
 stop(_State) ->

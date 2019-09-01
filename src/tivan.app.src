@@ -6,7 +6,9 @@
   {applications,
    [kernel,
     stdlib,
-    mnesia
+    mnesia,
+    mnesia_eleveldb,
+    lager
    ]},
   {env,[]},
   {modules, []},
