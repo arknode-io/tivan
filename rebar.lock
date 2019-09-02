@@ -1,12 +1,9 @@
 {"1.1.0",
 [{<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},1},
- {<<"lager">>,
-  {git,"https://github.com/erlang-lager/lager.git",
-       {ref,"bf60290101306b3cc26544d0d181a5cff8931e82"}},
-  0},
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.8.0">>},0},
  {<<"mnesia_rocksdb">>,
-  {git,"https://github.com/aeternity/mnesia_rocksdb.git",
-       {ref,"ad8e7b63cad473558377ce4a1c89ba07f09c0b21"}},
+  {git,"https://github.com/arknode-io/mnesia_rocksdb.git",
+       {ref,"85904dcf24bb5f6297922e91b37e946cfb258932"}},
   0},
  {<<"quickrand">>,
   {git,"https://github.com/okeuday/quickrand.git",
@@ -22,6 +19,7 @@
 [
 {pkg_hash,[
  {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
+ {<<"lager">>, <<"3402B9A7E473680CA179FC2F1D827CAB88DD37DD1E6113090C6F45EF05228A1C">>},
  {<<"rocksdb">>, <<"1FC862628B95A0D3AF05FAB709858AC1FA4199C0722BC4652236B0949304A04D">>},
  {<<"sext">>, <<"14559B219FAF11F9EBA7A350DFFC69C966C668439C54947A42D67167002798C4">>},
  {<<"uuid_erl">>, <<"3862FF9A21C42566DFD0376B97512FA202922897129E09A05E2AFA0D9CAFD97A">>}]}
