@@ -51,16 +51,14 @@ start_link() ->
 
 new() -> new(page, #{}).
 
-new(Name, Attributes) ->
-  Options = maps:get(options, Attributes, ?OPTIONS),
-  case maps:find(owner, Attributes) of
-    {ok, Pid} when Pid == self() ->
-      do_new(Name, Options);
-    {ok, _Pid} ->
-      {error, not_allowed};
-    error ->
-      Timeout = maps:get(timeout, Attributes, ?TIMEOUT),
-      gen_server:call(?MODULE, {new, Name, Options, Timeout})
+new(Name, Options) ->
+  CacheOptions = maps:get(cache_options, Options, ?OPTIONS),
+  case maps:get(manage, Options, false) of
+    true ->
+      do_new(Name, CacheOptions);
+    false ->
+      InactiveTimeout = maps:get(inactive_timeout, Options, ?TIMEOUT),
+      gen_server:call(?MODULE, {new, Name, CacheOptions, InactiveTimeout})
   end.
 
 put(Id, Objects) ->
@@ -139,24 +137,24 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({new, Name, Options, Timeout}, _From, State) ->
-  Id = do_new(Name, Options),
-  StateNew = State#{Id => {erlang:system_time(second), Timeout}},
+handle_call({new, Name, CacheOptions, InactiveTimeout}, _From, State) ->
+  Id = do_new(Name, CacheOptions),
+  StateNew = State#{Id => {erlang:system_time(second), InactiveTimeout}},
   {reply, Id, StateNew};
 handle_call({put, Id, Objects}, _From, State) ->
-  {_, Timeout} = maps:get(Id, State),
+  {_, InactiveTimeout} = maps:get(Id, State),
   Reply = do_put(Id, Objects),
-  StateNew = State#{Id => {erlang:system_time(second), Timeout}},
+  StateNew = State#{Id => {erlang:system_time(second), InactiveTimeout}},
   {reply, Reply, StateNew};
 handle_call({get, Id, Options}, _From, State) ->
-  {_, Timeout} = maps:get(Id, State),
+  {_, InactiveTimeout} = maps:get(Id, State),
   Reply = do_get(Id, Options),
-  StateNew = State#{Id => {erlang:system_time(second), Timeout}},
+  StateNew = State#{Id => {erlang:system_time(second), InactiveTimeout}},
   {reply, Reply, StateNew};
 handle_call({sort, Id, SortArgs}, _From, State) ->
-  {_, Timeout} = maps:get(Id, State),
+  {_, InactiveTimeout} = maps:get(Id, State),
   Reply = do_sort(Id, SortArgs),
-  StateNew = State#{Id => {erlang:system_time(second), Timeout}},
+  StateNew = State#{Id => {erlang:system_time(second), InactiveTimeout}},
   {reply, Reply, StateNew};
 handle_call({remove, Id}, _From, State) ->
   Reply = do_remove(Id),
@@ -234,8 +232,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-do_new(Name, Options) ->
-  ets:new(Name, Options).
+do_new(Name, CacheOptions) ->
+  ets:new(Name, CacheOptions).
 
 inspect(Id) ->
   case ets:info(Id) of
@@ -281,7 +279,7 @@ do_get(Id, #{search := Pattern}) ->
    );
 do_get(Id, Options) ->
   Start = maps:get(start, Options, 1),
-  Stop = maps:get(stop, Options, ets:info(Id, size)),
+  Stop = Start + maps:get(limit, Options, ets:info(Id, size)) - 1,
   lists:foldr(
     fun(K, Os) ->
         case ets:lookup(Id, K) of
