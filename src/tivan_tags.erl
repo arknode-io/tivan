@@ -11,6 +11,7 @@
 %% API
 -export([create/1
         ,tag/3
+        ,untag/3
         ,tags/2
         ,entities/2]).
 
@@ -31,6 +32,9 @@ tag(Name, Entity, Tag) ->
     _ ->
       ok
   end.
+
+untag(Name, Entity, Tag) ->
+  tivan:remove(Name, {Tag, Entity}).
 
 tags(Name, Entity) ->
   TagEntities = tivan:get(Name, #{match => #{tag_entity => {2, 2, Entity}}
