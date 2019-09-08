@@ -210,8 +210,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%--------------------------------------------------------------------
 %% #{Table => #{columns => #{Column => #{type => binary | list | tuple | atom | integer | float
-%%                                               OtherTable | {OtherTable, Field} | [OtherTable]
-%%                                               [{OtherTable, Field}] | uuid
+%%                                               | second | millisecond | microsecond | nanosecond
+%%                                               | OtherTable | {OtherTable, Field} | [OtherTable]
+%%                                               | [{OtherTable, Field}] | uuid
+%%                                               | {either, [Type1, Type2]}
 %%                                      ,limit => undefined | Length | {Min, Max} | [Item1, Item2]
 %%                                      ,key => false | true
 %%                                      ,index => false | true
@@ -274,7 +276,7 @@ init_table(Table, #{columns := ColumnsWithDef} = TableDef) ->
                #{},
                ColumnsWithDef
               ),
-  lager:info("Initiaing creation of ~p", [TableDef, Columns, Defaults]),
+  lager:info("Initiaing creation of ~p", [{TableDef, Columns, Defaults}]),
   tivan:create(Table, TableDef#{columns => Columns, defaults => Defaults}).
 
 get_key(Columns) when is_map(Columns) -> get_key(maps:to_list(Columns));
@@ -415,6 +417,19 @@ validate_type(Value, float, _Table, _Key, _KeyValue) ->
   is_float(Value);
 validate_type(Value, map, _Table, _Key, _KeyValue) ->
   is_map(Value);
+validate_type(Value, second, _Table, _Key, _KeyValue) when is_integer(Value) ->
+  (Value =< erlang:system_time(second)) and (Value > 0);
+validate_type(Value, millisecond, _Table, _Key, _KeyValue) when is_integer(Value) ->
+  (Value =< erlang:system_time(millisecond)) and (Value > 0);
+validate_type(Value, microsecond, _Table, _Key, _KeyValue) when is_integer(Value) ->
+  (Value =< erlang:system_time(microsecond)) and (Value > 0);
+validate_type(Value, nanosecond, _Table, _Key, _KeyValue) when is_integer(Value) ->
+  (Value =< erlang:system_time(nanosecond)) and (Value > 0);
+validate_type(Value, {any, Types}, _Table, _Key, _KeyValue) when is_list(Types) ->
+  lists:any(
+    fun(Type) -> validate_type(Value, Type, _Table, _Key, _KeyValue) end,
+    Types
+   );
 validate_type(Values, [{Table, Field}], _Table, _Key, _KeyValue) when is_list(Values) ->
   lists:all(
     fun(Value) ->
