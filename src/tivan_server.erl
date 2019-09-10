@@ -11,6 +11,9 @@
 -behaviour(gen_server).
 
 -callback init(Args :: list()) -> {'ok', State :: map()}.
+-callback handle_info(Info :: term()) -> 'ok'.
+
+-optional_callbacks([handle_info/1]).
 
 %% API
 -export([start_link/4
@@ -176,7 +179,12 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info(Info, #{callback := Callback} = State) ->
+  lager:info("Info received ~p", [Info]),
+  case erlang:function_exported(Callback, handle_info, 1) of
+    true -> Callback:handle_info(Info);
+    false -> ok
+  end,
   {noreply, State}.
 
 %%--------------------------------------------------------------------
