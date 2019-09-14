@@ -103,7 +103,11 @@ list() -> gen_server:call(?MODULE, list).
 
 purge() -> gen_server:cast(?MODULE, purge).
 
-info(Id) -> ets:info(Id).
+info(Id) ->
+  case ets:info(Id) of
+    undefined -> undefined;
+    InfoList -> maps:from_list(InfoList)
+  end.
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -307,29 +311,45 @@ pattern_lowercase(Pattern) when is_list(Pattern) ->
 pattern_lowercase(Pattern) when is_binary(Pattern) ->
   string:lowercase(Pattern).
 
+do_sort(Id, SortFun) when is_function(SortFun, 2) ->
+  ObjectsList = [ V || {_K, V} <- ets:tab2list(Id) ],
+  ObjectsListSorted = lists:sort(SortFun, ObjectsList),
+  reload(Id, ObjectsListSorted);
 do_sort(Id, SortArgs) ->
   case SortArgs of
-    Fun when is_function(Fun, 2) ->
-      ObjectsList = [ V || {_K, V} <- ets:tab2list(Id) ],
-      ObjectsListSorted = lists:sort(Fun, ObjectsList),
-      reload(Id, ObjectsListSorted);
     {Key, Order} when Order == desc; Order == asc ->
-      ObjectsList = lists:map(
-                      fun({_K, #{Key := Kv} = V}) ->
-                          {Kv, V};
-                         ({_K, V}) ->
-                          {undefined, V}
-                      end,
-                      ets:tab2list(Id)
-                     ),
-      Fun = case Order of
-              desc -> fun({K1, _}, {K2, _}) -> K1 > K2 end;
-              _ -> fun({K1, _}, {K2, _}) -> K1 < K2 end
-            end,
-      ObjectsListSorted = [ V || {_, V} <- lists:sort(Fun, ObjectsList)],
-      reload(Id, ObjectsListSorted);
+      case is_sort_required(Id, SortArgs) of
+        false ->
+          ok;
+        true ->
+          ObjectsList = lists:map(
+                          fun({_K, #{Key := Kv} = V}) ->
+                              {Kv, V};
+                             ({_K, V}) ->
+                              {undefined, V}
+                          end,
+                          ets:tab2list(Id)
+                         ),
+          Fun = case Order of
+                  desc -> fun({K1, _}, {K2, _}) -> K1 > K2 end;
+                  _ -> fun({K1, _}, {K2, _}) -> K1 < K2 end
+                end,
+          ObjectsListSorted = [ V || {_, V} <- lists:sort(Fun, ObjectsList)],
+          reload(Id, ObjectsListSorted)
+      end;
     Other ->
       do_sort(Id, {Other, asc})
+  end.
+
+is_sort_required(Id, {Key, Order}) ->
+  Name = list_to_atom(atom_to_list(Key) ++ "_" ++ atom_to_list(Order)),
+  case info(Id) of
+    undefined -> false;
+    #{named_table := true} -> true;
+    #{name := Name} -> false;
+    _ ->
+      ets:rename(Id, Name),
+      true
   end.
 
 reload(Id, ObjectsListSorted) ->

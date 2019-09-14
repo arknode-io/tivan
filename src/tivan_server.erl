@@ -15,6 +15,9 @@
 
 -optional_callbacks([handle_info/1]).
 
+-define(NATIVE_TYPES, [binary, list, tuple, atom, integer, float, second, millisecond, microsecond
+                       ,nanosecond, uuid]).
+
 %% API
 -export([start_link/4
         ,drop/2
@@ -221,7 +224,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%                                               | second | millisecond | microsecond | nanosecond
 %%                                               | OtherTable | {OtherTable, Field} | [OtherTable]
 %%                                               | [{OtherTable, Field}] | uuid
-%%                                               | {either, [Type1, Type2]}
+%%                                               | {any, [Type1, Type2]}
 %%                                      ,limit => undefined | Length | {Min, Max} | [Item1, Item2]
 %%                                      ,key => false | true
 %%                                      ,index => false | true
@@ -512,17 +515,171 @@ validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
   end;
 validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
-do_get(Table, #{match := _} = Options, TableDefs) ->
+do_get(Table, Options, TableDefs) ->
   case maps:find(Table, TableDefs) of
-    {ok, #{read_context := Context}} ->
-      tivan:get(Table, Options#{context => Context});
-    _ ->
-      tivan:get(Table, Options)
-  end;
-do_get(Table, Options, TableDefs) when is_map(Options) ->
-  do_get(Table, #{match => Options}, TableDefs);
-do_get(Table, Key, _TableDefs) ->
-  tivan:get(Table, Key).
+    error ->
+      {error, no_definition};
+    {ok, #{columns := ColumnsMap} = TableDef} ->
+      OptionsU = interpret_get_options(Options, maps:keys(ColumnsMap)),
+      Objects = case maps:find(read_context, TableDef) of
+                  error ->
+                    tivan:get(Table, OptionsU);
+                  {ok, Context} ->
+                    tivan:get(Table, OptionsU#{context => Context})
+                end,
+      {ObjectsLimited, Cache, Size} = paginate(Objects, OptionsU),
+      ObjectsExpanded = [ expand(Object, OptionsU, TableDef, TableDefs)
+                          || Object <- ObjectsLimited ],
+      if
+        Cache == undefined -> ObjectsExpanded;
+        true ->
+          #{Table => ObjectsExpanded, cache => Cache, size => Size}
+      end
+  end.
+
+interpret_get_options(#{match := _} = Options, _Columns) ->
+  Options;
+interpret_get_options(Options, Columns) ->
+  Match = maps:filter(
+            fun(Option, _Value) ->
+                lists:member(Option, Columns)
+            end,
+            Options
+           ),
+  lists:foldl(
+    fun({Alternate, Original}, OptionsAcc) ->
+        case maps:find(Original, Options) of
+          error ->
+            case maps:find(Alternate, Options) of
+              error -> OptionsAcc;
+              {ok, Value} -> OptionsAcc#{Original => Value}
+            end;
+          {ok, Value} -> OptionsAcc#{Original => Value}
+        end
+    end,
+    #{match => Match},
+    [{'_select',select}
+    ,{'_expand', expand}
+    ,{'_start', start}
+    ,{'_limit', limit}
+    ,{'_sort_column', sort_column}
+    ,{'_sort_order', sort_order}
+    ,{'_cache', cache}]
+   ).
+
+paginate(Objects, #{limit := Limit} = Options) ->
+  Start = maps:get(start, Options, 1),
+  Cache = case maps:find(cache, Options) of
+            error ->
+              initialize_cache(Objects);
+            {ok, Id} when is_reference(Id) ->
+              case tivan_page:info(Id) of
+                undefined ->
+                  initialize_cache(Objects);
+                _ ->
+                  Id
+              end;
+            {ok, Id} when is_binary(Id) ->
+              case catch list_to_ref(binary_to_list(Id)) of
+                {'EXIT', _Reason} ->
+                  initialize_cache(Objects);
+                IdRef ->
+                  case tivan_page:info(IdRef) of
+                    undefined ->
+                      initialize_cache(Objects);
+                    _ ->
+                      IdRef
+                  end
+              end
+          end,
+  case maps:find(sort_column, Options) of
+    error -> ok;
+    {ok, SortColumnRaw} ->
+      SortColumn = if is_binary(SortColumnRaw) ->
+                     case catch binary_to_existing_atom(SortColumnRaw, latin1) of
+                       {'EXIT', _} -> SortColumnRaw;
+                       SortColumnAtom -> SortColumnAtom
+                     end;
+                   is_list(SortColumnRaw) -> list_to_atom(SortColumnRaw);
+                   true -> SortColumnRaw end,
+      SortOrder = case maps:get(sort_order, Options, asc) of
+                    <<"desc">> -> desc;
+                    "desc" -> desc;
+                    desc -> desc;
+                    _ -> asc
+                  end,
+      tivan_page:sort(Cache, {SortColumn, SortOrder})
+  end,
+  ObjectsLimited = tivan_page:get(Cache, #{start => Start, limit => Limit}),
+  #{size := Size} = tivan_page:info(Cache),
+  CacheBin = list_to_binary(ref_to_list(Cache)),
+  {ObjectsLimited, CacheBin, Size};
+paginate(Objects, _Options) -> {Objects, undefined, undefined}.
+
+initialize_cache(Objects) ->
+  Id = tivan_page:new(),
+  ok = tivan_page:put(Id, Objects),
+  Id.
+
+expand(Object, #{expand := 0}, _TableDef, _TableDefs) -> Object;
+expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) andalso Level > 0 ->
+  maps:map(
+    fun(Column, Value) ->
+        #{columns := #{Column := #{type := ColumnType}}} = TableDef,
+        ValueExpanded = get_referred_object(ColumnType, Value),
+        case maps:find(ColumnType, TableDefs) of
+          error -> ValueExpanded;
+          {ok, TableDefOfValue} ->
+            expand(ValueExpanded, #{expand => Level - 1}, TableDefOfValue, TableDefs)
+        end
+    end,
+    Object
+   );
+expand(Object, #{expand := Level}, TableDef, TableDefs) ->
+  LevelInt = if
+               is_binary(Level) -> binary_to_integer(Level);
+               is_list(Level) -> list_to_integer(Level);
+               true -> 1
+             end,
+  expand(Object, #{expand => LevelInt}, TableDef, TableDefs);
+expand(Object, _Options, _TableDef, _TableDefs) -> Object.
+
+get_referred_object(ColumnType, Value) ->
+  IsNative = lists:member(ColumnType, ?NATIVE_TYPES),
+  case ColumnType of
+    _NativeType when IsNative -> Value;
+    {any, ColumnTypes} ->
+      try
+        lists:foldl(
+          fun(Type, ValueA) ->
+              case get_referred_object(Type, ValueA) of
+                Value -> Value;
+                ValueExpanded -> throw(ValueExpanded)
+              end
+          end,
+          Value,
+          ColumnTypes
+         )
+      catch
+        throw:ValueExpanded -> ValueExpanded
+      end;
+    [{Table, Field}] ->
+      lists:flatten([ get_referred_object({Table, Field}, X) || X <- Value ]);
+    [Table] ->
+      lists:flatten([ get_referred_object(Table, X) || X <- Value ]);
+    {Table, Field} ->
+      case tivan:get(Table, #{match => #{Field => Value}}) of
+        [] -> Value;
+        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
+        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
+      end;
+    Table ->
+      case tivan:get(Table, Value) of
+        [] -> Value;
+        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
+        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
+      end
+  end.
 
 do_remove(Table, Object, TableDefs) when is_map(Object) ->
   case maps:find(Table, TableDefs) of

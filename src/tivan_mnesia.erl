@@ -15,7 +15,7 @@
         ,remove/2
         ,remove/3]).
 
--define(LIMIT, 1000).
+-define(ROWS_LIMIT, 1000).
 
 put(Table, Objects) ->
   Context = application:get_env(tivan, write_context, transaction),
@@ -48,15 +48,16 @@ put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects)
   mnesia:activity(Context, WriteFun).
 
 get(Table) ->
-  Limit = application:get_env(tivan, default_rows_limit, ?LIMIT),
-  get(Table, #{limit => Limit}).
+  RowsLimit = application:get_env(tivan, default_rows_limit, ?ROWS_LIMIT),
+  get(Table, #{rows_limit => RowsLimit}).
 
-get(Table, #{limit := Limit} = Options) when map_size(Options) == 1 ->
-  get(Table, #{start_key => mnesia:dirty_first(Table), limit => Limit});
+get(Table, #{rows_limit := RowsLimit} = Options) when map_size(Options) == 1 ->
+  get(Table, #{start_key => mnesia:dirty_first(Table), rows_limit => RowsLimit});
 get(Table, #{start_key := StartKey} = Options) when map_size(Options) == 1 ->
-  Limit = application:get_env(tivan, default_rows_limit, ?LIMIT),
-  get(Table, #{start_key => StartKey, limit => Limit});
-get(Table, #{start_key := StartKey, limit := Limit}) when is_atom(Table), is_integer(Limit) ->
+  RowsLimit = application:get_env(tivan, default_rows_limit, ?ROWS_LIMIT),
+  get(Table, #{start_key => StartKey, rows_limit => RowsLimit});
+get(Table, #{start_key := StartKey, rows_limit := RowsLimit})
+  when is_atom(Table), is_integer(RowsLimit) ->
   Context = application:get_env(tivan, read_context, async_dirty),
   GetFunc = fun() ->
                 {NKey, Objs} = lists:foldl(
@@ -66,7 +67,7 @@ get(Table, #{start_key := StartKey, limit := Limit}) when is_atom(Table), is_int
                                      {mnesia:next(Table, K), mnesia:read(Table, K) ++ Rs}
                                  end,
                                  {StartKey, []},
-                                 lists:seq(1, Limit)),
+                                 lists:seq(1, RowsLimit)),
                 {NKey, lists:reverse(Objs)}
             end,
   {NextKey, Objects} = mnesia:activity(Context, GetFunc),
@@ -78,24 +79,24 @@ get(Table, Options) when is_atom(Table), is_map(Options) ->
   Context = maps:get(context, Options, application:get_env(tivan, read_context, async_dirty)),
   Attributes = mnesia:table_info(Table, attributes),
   SelectWithPos = select_with_position(Attributes, Select),
-  case maps:find(cont, Options) of
+  case maps:find(continue, Options) of
     error ->
       {MatchHead, GuardList} = prepare_mnesia_select(Table, Attributes, Match, Select),
-      case maps:find(limit, Options) of
+      case maps:find(rows_limit, Options) of
         error ->
           Objects = mnesia:activity(Context, fun mnesia:select/2,
                                     [Table, [{MatchHead, GuardList, ['$_']}]]),
           objects_to_map(Objects, Attributes, SelectWithPos, Match);
-        {ok, Limit} ->
+        {ok, RowsLimit} ->
           case mnesia:activity(Context, fun mnesia:select/4,
-                               [Table, [{MatchHead, GuardList, ['$_']}], Limit, read])of
+                               [Table, [{MatchHead, GuardList, ['$_']}], RowsLimit, read])of
             '$end_of_table' -> {'$end_of_table', []};
             {Objects, C} ->
               {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
           end
       end;
-    {ok, Cont} ->
-      case mnesia:activity(Context, fun mnesia:select/1, [Cont]) of
+    {ok, Continue} ->
+      case mnesia:activity(Context, fun mnesia:select/1, [Continue]) of
         '$end_of_table' -> {'$end_of_table', []};
         {Objects, C} ->
           {C, objects_to_map(Objects, Attributes, SelectWithPos, Match)}
