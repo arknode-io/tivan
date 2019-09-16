@@ -515,7 +515,7 @@ validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
   end;
 validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
-do_get(Table, Options, TableDefs) ->
+do_get(Table, Options, TableDefs) when is_map(Options) ->
   case maps:find(Table, TableDefs) of
     error ->
       {error, no_definition};
@@ -527,15 +527,12 @@ do_get(Table, Options, TableDefs) ->
                   {ok, Context} ->
                     tivan:get(Table, OptionsU#{context => Context})
                 end,
-      {ObjectsLimited, Cache, Size} = paginate(Objects, OptionsU),
       ObjectsExpanded = [ expand(Object, OptionsU, TableDef, TableDefs)
-                          || Object <- ObjectsLimited ],
-      if
-        Cache == undefined -> ObjectsExpanded;
-        true ->
-          #{Table => ObjectsExpanded, cache => Cache, size => Size}
-      end
-  end.
+                          || Object <- Objects ],
+      paginate(ObjectsExpanded, OptionsU, Table)
+  end;
+do_get(Table, Key, _TableDefs) ->
+  tivan:get(Table, Key).
 
 interpret_get_options(#{match := _} = Options, _Columns) ->
   Options;
@@ -567,7 +564,7 @@ interpret_get_options(Options, Columns) ->
     ,{'_cache', cache}]
    ).
 
-paginate(Objects, #{limit := Limit} = Options) ->
+paginate(Objects, #{limit := Limit} = Options, Table) ->
   Start = maps:get(start, Options, 1),
   Cache = case maps:find(cache, Options) of
             error ->
@@ -613,8 +610,31 @@ paginate(Objects, #{limit := Limit} = Options) ->
   ObjectsLimited = tivan_page:get(Cache, #{start => Start, limit => Limit}),
   #{size := Size} = tivan_page:info(Cache),
   CacheBin = list_to_binary(ref_to_list(Cache)),
-  {ObjectsLimited, CacheBin, Size};
-paginate(Objects, _Options) -> {Objects, undefined, undefined}.
+  #{Table => ObjectsLimited, cache => CacheBin, size => Size};
+paginate(Objects, #{sort_column := SortColumnRaw} = Options, _Table) ->
+  SortColumn = if is_binary(SortColumnRaw) ->
+                    case catch binary_to_existing_atom(SortColumnRaw, latin1) of
+                      {'EXIT', _} -> SortColumnRaw;
+                      SortColumnAtom -> SortColumnAtom
+                    end;
+                  is_list(SortColumnRaw) -> list_to_atom(SortColumnRaw);
+                  true -> SortColumnRaw end,
+  SortFun = case maps:get(sort_order, Options, asc) of
+              Order when Order == <<"desc">>;
+                         Order == "desc";
+                         Order == desc ->
+                fun(#{SortColumn := ValueA}, #{SortColumn := ValueB}) ->
+                    ValueA > ValueB;
+                   (_A, _B) -> true
+                end;
+              _ ->
+                fun(#{SortColumn := ValueA}, #{SortColumn := ValueB}) ->
+                    ValueA < ValueB;
+                   (_A, _B) -> true
+                end
+            end,
+  lists:sort(SortFun, Objects);
+paginate(Objects, _Options, _Table) -> Objects.
 
 initialize_cache(Objects) ->
   Id = tivan_page:new(),
