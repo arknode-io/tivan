@@ -529,7 +529,8 @@ do_get(Table, Options, TableDefs) when is_map(Options) ->
                 end,
       ObjectsExpanded = [ expand(Object, OptionsU, TableDef, TableDefs)
                           || Object <- Objects ],
-      paginate(ObjectsExpanded, OptionsU, Table)
+      ObjectsFlattend = flatten(ObjectsExpanded, OptionsU),
+      paginate(ObjectsFlattend, OptionsU, Table)
   end;
 do_get(Table, Key, _TableDefs) ->
   tivan:get(Table, Key).
@@ -561,8 +562,79 @@ interpret_get_options(Options, Columns) ->
     ,{'_limit', limit}
     ,{'_sort_column', sort_column}
     ,{'_sort_order', sort_order}
-    ,{'_cache', cache}]
+    ,{'_cache', cache}
+    ,{'_flatten', flatten}]
    ).
+
+expand(Object, #{expand := 0}, _TableDef, _TableDefs) -> Object;
+expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) andalso Level > 0 ->
+  maps:map(
+    fun(Column, Value) ->
+        #{columns := #{Column := #{type := ColumnType}}} = TableDef,
+        ValueExpanded = get_referred_object(ColumnType, Value),
+        case maps:find(ColumnType, TableDefs) of
+          error -> ValueExpanded;
+          {ok, TableDefOfValue} ->
+            expand(ValueExpanded, #{expand => Level - 1}, TableDefOfValue, TableDefs)
+        end
+    end,
+    Object
+   );
+expand(Object, #{expand := Level}, TableDef, TableDefs) ->
+  LevelInt = if
+               is_binary(Level) -> binary_to_integer(Level);
+               is_list(Level) -> list_to_integer(Level);
+               true -> 1
+             end,
+  expand(Object, #{expand => LevelInt}, TableDef, TableDefs);
+expand(Object, _Options, _TableDef, _TableDefs) -> Object.
+
+get_referred_object(ColumnType, Value) ->
+  IsNative = lists:member(ColumnType, ?NATIVE_TYPES),
+  case ColumnType of
+    _NativeType when IsNative -> Value;
+    {any, ColumnTypes} ->
+      try
+        lists:foldl(
+          fun(Type, ValueA) ->
+              case get_referred_object(Type, ValueA) of
+                Value -> Value;
+                ValueExpanded -> throw(ValueExpanded)
+              end
+          end,
+          Value,
+          ColumnTypes
+         )
+      catch
+        throw:ValueExpanded -> ValueExpanded
+      end;
+    [{Table, Field}] ->
+      lists:flatten([ get_referred_object({Table, Field}, X) || X <- Value ]);
+    [Table] ->
+      lists:flatten([ get_referred_object(Table, X) || X <- Value ]);
+    {Table, Field} ->
+      case tivan:get(Table, #{match => #{Field => Value}}) of
+        [] -> Value;
+        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
+        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
+      end;
+    Table ->
+      case tivan:get(Table, Value) of
+        [] -> Value;
+        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
+        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
+      end
+  end.
+
+flatten(Objects, #{flatten := True}) when True == true; True == <<"true">> ->
+  [ flatten(Object) || Object <- Objects ];
+flatten(Objects, _OptionsU) -> Objects.
+
+flatten(Object) ->
+  case maps:to_list(Object) of
+    [{_Key, Value}] -> Value;
+    _ -> Object
+  end.
 
 paginate(Objects, #{limit := Limit} = Options, Table) ->
   Start = maps:get(start, Options, 1),
@@ -640,66 +712,6 @@ initialize_cache(Objects) ->
   Id = tivan_page:new(),
   ok = tivan_page:put(Id, Objects),
   Id.
-
-expand(Object, #{expand := 0}, _TableDef, _TableDefs) -> Object;
-expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) andalso Level > 0 ->
-  maps:map(
-    fun(Column, Value) ->
-        #{columns := #{Column := #{type := ColumnType}}} = TableDef,
-        ValueExpanded = get_referred_object(ColumnType, Value),
-        case maps:find(ColumnType, TableDefs) of
-          error -> ValueExpanded;
-          {ok, TableDefOfValue} ->
-            expand(ValueExpanded, #{expand => Level - 1}, TableDefOfValue, TableDefs)
-        end
-    end,
-    Object
-   );
-expand(Object, #{expand := Level}, TableDef, TableDefs) ->
-  LevelInt = if
-               is_binary(Level) -> binary_to_integer(Level);
-               is_list(Level) -> list_to_integer(Level);
-               true -> 1
-             end,
-  expand(Object, #{expand => LevelInt}, TableDef, TableDefs);
-expand(Object, _Options, _TableDef, _TableDefs) -> Object.
-
-get_referred_object(ColumnType, Value) ->
-  IsNative = lists:member(ColumnType, ?NATIVE_TYPES),
-  case ColumnType of
-    _NativeType when IsNative -> Value;
-    {any, ColumnTypes} ->
-      try
-        lists:foldl(
-          fun(Type, ValueA) ->
-              case get_referred_object(Type, ValueA) of
-                Value -> Value;
-                ValueExpanded -> throw(ValueExpanded)
-              end
-          end,
-          Value,
-          ColumnTypes
-         )
-      catch
-        throw:ValueExpanded -> ValueExpanded
-      end;
-    [{Table, Field}] ->
-      lists:flatten([ get_referred_object({Table, Field}, X) || X <- Value ]);
-    [Table] ->
-      lists:flatten([ get_referred_object(Table, X) || X <- Value ]);
-    {Table, Field} ->
-      case tivan:get(Table, #{match => #{Field => Value}}) of
-        [] -> Value;
-        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
-        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
-      end;
-    Table ->
-      case tivan:get(Table, Value) of
-        [] -> Value;
-        [ValueExpanded] -> ValueExpanded#{'_type' => Table};
-        ValuesExpanded -> [ X#{'_type' => Table} || X <- ValuesExpanded ]
-      end
-  end.
 
 do_remove(Table, Object, TableDefs) when is_map(Object) ->
   case maps:find(Table, TableDefs) of
