@@ -16,7 +16,7 @@
 -optional_callbacks([handle_info/1]).
 
 -define(NATIVE_TYPES, [binary, list, tuple, atom, integer, float, second, millisecond, microsecond
-                       ,nanosecond, uuid]).
+                      ,map ,nanosecond, uuid]).
 
 %% API
 -export([start_link/4
