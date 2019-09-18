@@ -580,13 +580,6 @@ expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) a
     end,
     Object
    );
-expand(Object, #{expand := Level}, TableDef, TableDefs) ->
-  LevelInt = if
-               is_binary(Level) -> binary_to_integer(Level);
-               is_list(Level) -> list_to_integer(Level);
-               true -> 1
-             end,
-  expand(Object, #{expand => LevelInt}, TableDef, TableDefs);
 expand(Object, _Options, _TableDef, _TableDefs) -> Object.
 
 get_referred_object(ColumnType, Value) ->
@@ -647,33 +640,12 @@ paginate(Objects, #{limit := Limit} = Options, Table) ->
                   initialize_cache(Objects);
                 _ ->
                   Id
-              end;
-            {ok, Id} when is_binary(Id) ->
-              case catch list_to_ref(binary_to_list(Id)) of
-                {'EXIT', _Reason} ->
-                  initialize_cache(Objects);
-                IdRef ->
-                  case tivan_page:info(IdRef) of
-                    undefined ->
-                      initialize_cache(Objects);
-                    _ ->
-                      IdRef
-                  end
               end
           end,
   case maps:find(sort_column, Options) of
     error -> ok;
-    {ok, SortColumnRaw} ->
-      SortColumn = if is_binary(SortColumnRaw) ->
-                     case catch binary_to_existing_atom(SortColumnRaw, latin1) of
-                       {'EXIT', _} -> SortColumnRaw;
-                       SortColumnAtom -> SortColumnAtom
-                     end;
-                   is_list(SortColumnRaw) -> list_to_atom(SortColumnRaw);
-                   true -> SortColumnRaw end,
+    {ok, SortColumn} ->
       SortOrder = case maps:get(sort_order, Options, asc) of
-                    <<"desc">> -> desc;
-                    "desc" -> desc;
                     desc -> desc;
                     _ -> asc
                   end,
@@ -681,20 +653,10 @@ paginate(Objects, #{limit := Limit} = Options, Table) ->
   end,
   ObjectsLimited = tivan_page:get(Cache, #{start => Start, limit => Limit}),
   #{size := Size} = tivan_page:info(Cache),
-  CacheBin = list_to_binary(ref_to_list(Cache)),
-  #{Table => ObjectsLimited, cache => CacheBin, size => Size};
-paginate(Objects, #{sort_column := SortColumnRaw} = Options, _Table) ->
-  SortColumn = if is_binary(SortColumnRaw) ->
-                    case catch binary_to_existing_atom(SortColumnRaw, latin1) of
-                      {'EXIT', _} -> SortColumnRaw;
-                      SortColumnAtom -> SortColumnAtom
-                    end;
-                  is_list(SortColumnRaw) -> list_to_atom(SortColumnRaw);
-                  true -> SortColumnRaw end,
+  #{Table => ObjectsLimited, cache => Cache, size => Size};
+paginate(Objects, #{sort_column := SortColumn} = Options, _Table) ->
   SortFun = case maps:get(sort_order, Options, asc) of
-              Order when Order == <<"desc">>;
-                         Order == "desc";
-                         Order == desc ->
+              desc ->
                 fun(#{SortColumn := ValueA}, #{SortColumn := ValueB}) ->
                     ValueA > ValueB;
                    (_A, _B) -> true
