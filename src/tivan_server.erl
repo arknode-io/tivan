@@ -582,6 +582,7 @@ expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) a
    );
 expand(Object, _Options, _TableDef, _TableDefs) -> Object.
 
+get_referred_object(_ColumnType, undefined) -> undefined;
 get_referred_object(ColumnType, Value) ->
   IsNative = lists:member(ColumnType, ?NATIVE_TYPES),
   case ColumnType of
@@ -601,9 +602,9 @@ get_referred_object(ColumnType, Value) ->
       catch
         throw:ValueExpanded -> ValueExpanded
       end;
-    [{Table, Field}] ->
+    [{Table, Field}] when is_list(Value) ->
       lists:flatten([ get_referred_object({Table, Field}, X) || X <- Value ]);
-    [Table] ->
+    [Table] when is_list(Value) ->
       lists:flatten([ get_referred_object(Table, X) || X <- Value ]);
     {Table, Field} ->
       case tivan:get(Table, #{match => #{Field => Value}}) of
