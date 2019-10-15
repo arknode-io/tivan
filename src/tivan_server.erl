@@ -16,7 +16,7 @@
 -optional_callbacks([handle_info/1]).
 
 -define(NATIVE_TYPES, [binary, list, tuple, atom, integer, float, second, millisecond, microsecond
-                      ,map ,nanosecond, uuid]).
+                      ,map ,nanosecond, uuid, pid]).
 
 %% API
 -export([start_link/4
@@ -223,7 +223,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% #{Table => #{columns => #{Column => #{type => binary | list | tuple | atom | integer | float
 %%                                               | second | millisecond | microsecond | nanosecond
 %%                                               | OtherTable | {OtherTable, Field} | [OtherTable]
-%%                                               | [{OtherTable, Field}] | uuid
+%%                                               | [{OtherTable, Field}] | uuid | pid
 %%                                               | {any, [Type1, Type2]}
 %%                                      ,limit => undefined | Length | {Min, Max} | [Item1, Item2]
 %%                                      ,key => false | true
@@ -428,6 +428,8 @@ validate_type(Value, float, _Table, _Key, _KeyValue) ->
   is_float(Value);
 validate_type(Value, map, _Table, _Key, _KeyValue) ->
   is_map(Value);
+validate_type(Value, pid, _Table, _Key, _KeyValue) ->
+  is_pid(Value) andalso is_process_alive(Value);
 validate_type(Value, second, _Table, _Key, _KeyValue) when is_integer(Value) ->
   (Value =< erlang:system_time(second)) and (Value > 0);
 validate_type(Value, millisecond, _Table, _Key, _KeyValue) when is_integer(Value) ->
