@@ -8,6 +8,7 @@
     stdlib,
     mnesia,
     mnesia_rocksdb,
+    uuid,
     lager
    ]},
   {env,[]},
