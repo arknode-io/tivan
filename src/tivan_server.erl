@@ -522,7 +522,8 @@ do_get(Table, Options, TableDefs) when is_map(Options) ->
     error ->
       {error, no_definition};
     {ok, #{columns := ColumnsMap} = TableDef} ->
-      OptionsU = interpret_get_options(Options, maps:keys(ColumnsMap)),
+      ColumnsToMatch = ['_'|maps:keys(ColumnsMap)],
+      OptionsU = interpret_get_options(Options, ColumnsToMatch),
       Objects = case maps:find(read_context, TableDef) of
                   error ->
                     tivan:get(Table, OptionsU);
