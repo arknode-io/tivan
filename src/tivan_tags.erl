@@ -24,16 +24,18 @@ create(Name) ->
   tivan:create(Name, #{columns => [tag_entity, created_on]
                        ,type => ordered_set}).
 
-tag(Name, Entity, Tag) ->
+tag(Name, Entity, TagUnknownCase) ->
+  Tag = string:uppercase(TagUnknownCase),
   case tivan:get(Name, {Tag, Entity}) of
     [] ->
       Now = erlang:system_time(second),
       tivan:put(Name, #{tag_entity => {Tag, Entity}, created_on => Now});
     _ ->
-      ok
+      {Tag, Entity}
   end.
 
-untag(Name, Entity, Tag) ->
+untag(Name, Entity, TagUnknownCase) ->
+  Tag = string:uppercase(TagUnknownCase),
   tivan:remove(Name, {Tag, Entity}).
 
 tags(Name, Entity) ->
@@ -41,7 +43,8 @@ tags(Name, Entity) ->
                                    ,select => [tag_entity]}),
   [ T || #{tag_entity := {T, _}} <- TagEntities ].
 
-entities(Name, [Tag]) ->
+entities(Name, [TagUnknownCase]) ->
+  Tag = string:uppercase(TagUnknownCase),
   TagEntities = tivan:get(Name, #{match => #{tag_entity => {1, 2, Tag}}
                                    ,select => [tag_entity]}),
   [ E || #{tag_entity := {_, E}} <- TagEntities ];
@@ -49,7 +52,8 @@ entities(Name, [Tag|Tags]) ->
   lists:filter(
     fun(Entity) ->
         lists:all(
-          fun(T) ->
+          fun(Tu) ->
+              T = string:uppercase(Tu),
               case tivan:get(Name, {T, Entity}) of
                 [] -> false;
                 _ -> true

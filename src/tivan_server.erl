@@ -16,7 +16,7 @@
 -optional_callbacks([handle_info/1]).
 
 -define(NATIVE_TYPES, [binary, list, tuple, atom, integer, float, second, millisecond, microsecond
-                      ,map ,nanosecond, uuid, pid]).
+                      ,map ,nanosecond, uuid, pid, boolean]).
 
 %% API
 -export([start_link/4
@@ -235,6 +235,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%             ,persist => true | false
 %%             ,type => set |ordered_set | bag
 %%             ,audit => false | true
+%%             ,tags => undefined | TagName
 %%             ,unique_combo => [] | [{column1, column2}, {... },... ]
 %%             ,read_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
 %%             ,write_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
@@ -287,6 +288,13 @@ init_table(Table, #{columns := ColumnsWithDef} = TableDef) ->
                #{},
                ColumnsWithDef
               ),
+  case maps:get(tags, TableDef, undefined) of
+    undefined ->
+      lager:info("No tags assoication needed");
+    TagName ->
+      lager:info("Creating Tags association ~p", [TagName]),
+      tivan_tags:create(TagName)
+  end,
   lager:info("Initiaing creation of ~p", [{TableDef, Columns, Defaults}]),
   tivan:create(Table, TableDef#{columns => Columns, defaults => Defaults}).
 
