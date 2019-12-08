@@ -45,7 +45,10 @@ put(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objects)
                    Objects
                   )
              end,
-  mnesia:activity(Context, WriteFun).
+  mnesia:activity(Context, WriteFun);
+put(Table, Objects, _Options) ->
+  Context = application:get_env(tivan, write_context, transaction),
+  put(Table, Objects, #{context => Context}).
 
 get(Table) ->
   RowsLimit = application:get_env(tivan, default_rows_limit, ?ROWS_LIMIT),
@@ -259,5 +262,8 @@ remove(Table, Objects, #{context := Context}) when is_atom(Table), is_list(Objec
                    )
               end,
   mnesia:activity(Context, RemoveFun);
+remove(Table, Objects, _Options) when is_list(Objects) ->
+  Context = application:get_env(tivan, write_context, transaction),
+  remove(Table, Objects, #{context => Context});
 remove(Table, ObjectOrKey, Options) ->
   remove(Table, [ObjectOrKey], Options).

@@ -64,7 +64,6 @@ table_defs(Server) ->
   gen_server:call(Server, table_defs).
 
 put(Server, Table, Object) ->
-  % TableDefs = table_defs(Server),
   TableDefs = persistent_term:get({Server, table_defs}),
   do_put(Table, Object, TableDefs).
 
@@ -72,7 +71,6 @@ put_s(Server, Table, Object) ->
   gen_server:call(Server, {put, Table, Object}).
 
 get(Server, Table, Options) ->
-  % TableDefs = table_defs(Server),
   TableDefs = persistent_term:get({Server, table_defs}),
   do_get(Table, Options, TableDefs).
 
@@ -80,12 +78,11 @@ get_s(Server, Table, Options) ->
   gen_server:call(Server, {get, Table, Options}).
 
 remove(Server, Table, Object) ->
-  % TableDefs = table_defs(Server),
   TableDefs = persistent_term:get({Server, table_defs}),
   do_remove(Table, Object, TableDefs).
 
 remove_s(Server, Table, Object) ->
-  gen_server:cast(Server, {remove, Table, Object}).
+  gen_server:call(Server, {remove, Table, Object}).
 
 initialize(Server) ->
   gen_server:cast(Server, initialize).
@@ -138,6 +135,9 @@ handle_call({put, Table, Object}, _From, #{table_defs := TableDefs} = State) ->
 handle_call({get, Table, Options}, _From, #{table_defs := TableDefs} = State) ->
   Reply = do_get(Table, Options, TableDefs),
   {reply, Reply, State};
+handle_call({remove, Table, Object}, _From, #{table_defs := TableDefs} = State) ->
+  Reply = do_remove(Table, Object, TableDefs),
+  {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
   {reply, Reply, State}.
@@ -157,9 +157,6 @@ handle_cast({drop, Table}, #{table_defs := TableDefs, server := Server} = State)
   TableDefsU = maps:remove(Table, TableDefs),
   persistent_term:put({Server, table_defs}, TableDefsU),
   {noreply, State#{table_defs => TableDefsU}};
-handle_cast({remove, Table, Object}, #{table_defs := TableDefs} = State) ->
-  do_remove(Table, Object, TableDefs),
-  {noreply, State};
 handle_cast(initialize, #{callback := Callback
                          ,server := Server
                          ,init_args := Arguments} = State) ->
@@ -235,7 +232,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%             ,persist => true | false
 %%             ,type => set |ordered_set | bag
 %%             ,audit => false | true
-%%             ,tags => undefined | TagName
+%%             ,tags => undefined | TagStoreName
 %%             ,unique_combo => [] | [{column1, column2}, {... },... ]
 %%             ,read_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
 %%             ,write_context => SYSCONFIG | async_dirty | transaction | sync_transaction | etc
@@ -312,12 +309,20 @@ do_put(Table, Object, TableDefs) ->
       ObjectWithAudit = update_audit(ObjectWithKey, TableDef),
       case validate(ObjectWithAudit, Table, TableDef) of
         {ok, ObjectValidated} ->
-          KeyValue = case maps:find(write_context, TableDef) of
-                       error ->
-                         tivan:put(Table, ObjectValidated);
-                       {ok, Context} ->
-                         tivan:put(Table, ObjectValidated, #{context => Context})
-                     end,
+          Options = case maps:find(write_context, TableDef) of
+                      error ->
+                        #{};
+                      {ok, Context} ->
+                        #{context => Context}
+                    end,
+          KeyValue = tivan:put(Table, ObjectValidated, Options),
+          case maps:get(tags, TableDef, undefined) of
+            undefined ->
+              ok;
+            TagStoreName ->
+              Tags = maps:get(tags, Object, undefined),
+              tag(TagStoreName, KeyValue, Tags)
+          end,
           #{Key => KeyValue};
         Error ->
           Error
@@ -337,10 +342,13 @@ update_key_curr_object(Object, Table, #{columns := Columns, key := Key} = TableD
       Object#{Key => Value};
     {ok, Value} when TableType /= bag ->
       case tivan:get(Table, Value) of
-        [] -> Object;
-        [ObjectPrev] -> maps:merge(ObjectPrev, Object)
+        [] ->
+          Object;
+        [ObjectPrev] ->
+          maps:merge(ObjectPrev, Object)
       end;
-    _ -> Object
+    _ ->
+      Object
   end.
 
 update_audit(Object, #{audit := true}) ->
@@ -525,26 +533,40 @@ validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
   end;
 validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
-do_get(Table, Options, TableDefs) when is_map(Options) ->
+tag(TagStoreName, KeyValue, TagsAfter) ->
+  TagsBefore = tivan_tags:tags(TagStoreName, KeyValue),
+  [ tivan_tags:untag(TagStoreName, KeyValue, Tag) || Tag <- TagsBefore -- TagsAfter ],
+  [ tivan_tags:tag(TagStoreName, KeyValue, Tag) || Tag <- TagsAfter -- TagsBefore ].
+
+do_get(Table, Options, TableDefs) ->
   case maps:find(Table, TableDefs) of
     error ->
       {error, no_definition};
-    {ok, #{columns := ColumnsMap} = TableDef} ->
-      ColumnsToMatch = ['_'|maps:keys(ColumnsMap)],
-      OptionsU = interpret_get_options(Options, ColumnsToMatch),
-      Objects = case maps:find(read_context, TableDef) of
-                  error ->
-                    tivan:get(Table, OptionsU);
-                  {ok, Context} ->
-                    tivan:get(Table, OptionsU#{context => Context})
-                end,
-      ObjectsExpanded = [ expand(Object, OptionsU, TableDef, TableDefs)
-                          || Object <- Objects ],
-      ObjectsFlattend = flatten(ObjectsExpanded, OptionsU),
-      paginate(ObjectsFlattend, OptionsU, Table)
-  end;
-do_get(Table, Key, _TableDefs) ->
-  tivan:get(Table, Key).
+    {ok, TableDef} ->
+      do_get_1(Table, Options, TableDef, TableDefs)
+  end.
+
+do_get_1(Table, Options, #{columns := ColumnsMap} = TableDef, TableDefs)
+  when is_map(Options) ->
+  ColumnsToMatch = ['_'|maps:keys(ColumnsMap)],
+  OptionsFormatted = interpret_get_options(Options, ColumnsToMatch),
+  OptionsForTags = options_for_tags(Options, TableDef),
+  OptionsWithContext = case maps:find(read_context, TableDef) of
+                         error ->
+                           OptionsForTags;
+                         {ok, Context} ->
+                           OptionsForTags#{context => Context}
+                       end,
+  Objects = tivan:get(Table, OptionsWithContext),
+  ObjectsWithTags = objects_with_tags(Options, TableDef, Objects),
+  ObjectsCleanedUp = remove_key_if_not_asked(Options, TableDef, ObjectsWithTags),
+  ObjectsExpanded = [ expand(Object, OptionsFormatted, TableDef, TableDefs)
+                      || Object <- ObjectsCleanedUp ],
+  ObjectsFlattend = flatten(ObjectsExpanded, OptionsFormatted),
+  paginate(ObjectsFlattend, OptionsFormatted, Table);
+do_get_1(Table, KeyValue, #{key := Key} = TableDef, TableDefs) ->
+  do_get_1(Table, #{Key => KeyValue}, TableDef, TableDefs).
+
 
 interpret_get_options(#{match := _} = Options, _Columns) ->
   Options;
@@ -576,6 +598,71 @@ interpret_get_options(Options, Columns) ->
     ,{'_cache', cache}
     ,{'_flatten', flatten}]
    ).
+
+options_for_tags(Options, #{key := Key} = TableDef) ->
+  TagsDef = maps:get(tags, TableDef, undefined),
+  Selects = maps:get(select, Options, []),
+  IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
+  IsKeySelected = Selects == [] orelse lists:member(Key, Selects),
+  IsTagForMatch = maps:is_key(tags, Options),
+  if
+    TagsDef =/= undefined
+    , (IsTagSelected or IsTagForMatch)
+    , not IsKeySelected ->
+      Options#{select => [Key|Selects]};
+    true ->
+      Options
+  end.
+
+objects_with_tags(Options, #{key := Key} = TableDef, Objects) ->
+  TagsDef = maps:get(tags, TableDef, undefined),
+  Selects = maps:get(select, Options, []),
+  IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
+  IsTagForMatch = maps:is_key(tags, Options),
+  case TagsDef of
+    undefined ->
+      Objects;
+    TagStoreName when IsTagForMatch ->
+      TagsToSearch = maps:get(tags, Options),
+      Enttities = tivan_tags:entities(TagStoreName, TagsToSearch),
+      lists:filtermap(
+        fun(#{Key := KeyValue} = Object) ->
+            case lists:member(KeyValue, Enttities) of
+              false -> false;
+              true when IsTagSelected ->
+                Tags = tivan_tags:tags(TagStoreName, KeyValue),
+                {true, Object#{tags => Tags}};
+              true -> true
+            end
+        end,
+        Objects
+       );
+    TagStoreName when IsTagSelected ->
+      lists:map(
+        fun(#{Key := KeyValue} = Object) ->
+            Tags = tivan_tags:tags(TagStoreName, KeyValue),
+            Object#{tags => Tags}
+        end,
+        Objects
+       );
+    _ ->
+      Objects
+  end.
+
+remove_key_if_not_asked(Options, #{key := Key} = TableDef, Objects) ->
+  TagsDef = maps:get(tags, TableDef, undefined),
+  Selects = maps:get(select, Options, []),
+  IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
+  IsKeySelected = Selects == [] orelse lists:member(Key, Selects),
+  IsTagForMatch = maps:is_key(tags, Options),
+  if
+    TagsDef =/= undefined
+    , (IsTagSelected or IsTagForMatch)
+    , not IsKeySelected ->
+      [ maps:remove(Key, O) || O <- Objects ];
+    true ->
+      Objects
+  end.
 
 expand(Object, #{expand := 0}, _TableDef, _TableDefs) -> Object;
 expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) andalso Level > 0 ->
@@ -687,12 +774,33 @@ initialize_cache(Objects) ->
   ok = tivan_page:put(Id, Objects),
   Id.
 
-do_remove(Table, Object, TableDefs) when is_map(Object) ->
+do_remove(Table, Object, TableDefs) ->
   case maps:find(Table, TableDefs) of
-    {ok, #{write_context := Context}} ->
-      tivan:remove(Table, Object, #{context => Context});
-    _ ->
-      tivan:remove(Table, Object)
+    error ->
+      {error, no_definition};
+    {ok, TableDef} ->
+      do_remove_1(Table, Object, TableDef)
+  end.
+
+do_remove_1(Table, Object, #{key := Key} = TableDef) when is_map(Object) ->
+  case maps:find(Key, Object) of
+    error ->
+      {error, no_key};
+    {ok, KeyValue} ->
+      Options = case maps:find(write_context, TableDef) of
+                  error ->
+                    #{};
+                  {ok, Context} ->
+                    #{context => Context}
+                end,
+      case maps:get(tags, TableDef, undefined) of
+        undefined ->
+          ok;
+        TagStoreName ->
+          Tags = tivan_tags:tags(TagStoreName, KeyValue),
+          [ tivan_tags:untag(TagStoreName, KeyValue, Tag) || Tag <- Tags ]
+      end,
+      tivan:remove(Table, KeyValue, Options)
   end;
-do_remove(Table, Key, _TableDef) ->
-  tivan:remove(Table, Key).
+do_remove_1(Table, KeyValue, #{key := Key} = TableDef) ->
+  do_remove_1(Table, #{Key => KeyValue}, TableDef).
