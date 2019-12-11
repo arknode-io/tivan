@@ -533,6 +533,8 @@ validate_unique_combo(Object, Table, Key, [ComboTuple|UniqueComboList]) ->
   end;
 validate_unique_combo(_Object, _Table, _Key, []) -> ok.
 
+tag(TagStoreName, KeyValue, undefined) ->
+  tag(TagStoreName, KeyValue, []);
 tag(TagStoreName, KeyValue, TagsAfter) ->
   TagsBefore = tivan_tags:tags(TagStoreName, KeyValue),
   [ tivan_tags:untag(TagStoreName, KeyValue, Tag) || Tag <- TagsBefore -- TagsAfter ],
@@ -550,7 +552,7 @@ do_get_1(Table, Options, #{columns := ColumnsMap} = TableDef, TableDefs)
   when is_map(Options) ->
   ColumnsToMatch = ['_'|maps:keys(ColumnsMap)],
   OptionsFormatted = interpret_get_options(Options, ColumnsToMatch),
-  OptionsForTags = options_for_tags(Options, TableDef),
+  OptionsForTags = options_for_tags(OptionsFormatted, TableDef),
   OptionsWithContext = case maps:find(read_context, TableDef) of
                          error ->
                            OptionsForTags;
@@ -558,8 +560,8 @@ do_get_1(Table, Options, #{columns := ColumnsMap} = TableDef, TableDefs)
                            OptionsForTags#{context => Context}
                        end,
   Objects = tivan:get(Table, OptionsWithContext),
-  ObjectsWithTags = objects_with_tags(Options, TableDef, Objects),
-  ObjectsCleanedUp = remove_key_if_not_asked(Options, TableDef, ObjectsWithTags),
+  ObjectsWithTags = objects_with_tags(OptionsWithContext, Table, TableDef, Objects),
+  ObjectsCleanedUp = remove_key_if_not_asked(OptionsFormatted, TableDef, ObjectsWithTags),
   ObjectsExpanded = [ expand(Object, OptionsFormatted, TableDef, TableDefs)
                       || Object <- ObjectsCleanedUp ],
   ObjectsFlattend = flatten(ObjectsExpanded, OptionsFormatted),
@@ -602,9 +604,10 @@ interpret_get_options(Options, Columns) ->
 options_for_tags(Options, #{key := Key} = TableDef) ->
   TagsDef = maps:get(tags, TableDef, undefined),
   Selects = maps:get(select, Options, []),
+  Match = maps:get(match, Options, #{}),
   IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
   IsKeySelected = Selects == [] orelse lists:member(Key, Selects),
-  IsTagForMatch = maps:is_key(tags, Options),
+  IsTagForMatch = maps:is_key(tags, Match) orelse maps:is_key('_', Match),
   if
     TagsDef =/= undefined
     , (IsTagSelected or IsTagForMatch)
@@ -614,47 +617,50 @@ options_for_tags(Options, #{key := Key} = TableDef) ->
       Options
   end.
 
-objects_with_tags(Options, #{key := Key} = TableDef, Objects) ->
+objects_with_tags(Options, Table, #{key := Key} = TableDef, Objects) ->
   TagsDef = maps:get(tags, TableDef, undefined),
   Selects = maps:get(select, Options, []),
+  Match = maps:get(match, Options, #{}),
   IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
-  IsTagForMatch = maps:is_key(tags, Options),
+  IsTagForMatch = maps:is_key(tags, Match) orelse maps:is_key('_', Match),
+  lager:info("TagsDef ~p, Select ~p, Match ~p, IsTagSelected ~p, IsTagForMatch ~p"
+             , [TagsDef, Selects, Match, IsTagSelected, IsTagForMatch]),
   case TagsDef of
     undefined ->
       Objects;
-    TagStoreName when IsTagForMatch ->
-      TagsToSearch = maps:get(tags, Options),
-      Enttities = tivan_tags:entities(TagStoreName, TagsToSearch),
+    TagStoreName ->
+      TagsToSearch = maps:get(tags, Match, []) ++ maps:get('_', Match, []),
+      Entities = tivan_tags:entities(TagStoreName, TagsToSearch),
+      ObjectsU = if Objects == [], Entities =/= undefined ->
+                      tivan:get(Table, Options#{match => maps:remove('_', Match)});
+                    true -> Objects end,
       lists:filtermap(
-        fun(#{Key := KeyValue} = Object) ->
-            case lists:member(KeyValue, Enttities) of
+        fun(Object) when IsTagForMatch, Entities =/= undefined ->
+            #{Key := KeyValue} = Object,
+            case lists:member(KeyValue, Entities) of
               false -> false;
               true when IsTagSelected ->
                 Tags = tivan_tags:tags(TagStoreName, KeyValue),
                 {true, Object#{tags => Tags}};
               true -> true
-            end
-        end,
-        Objects
-       );
-    TagStoreName when IsTagSelected ->
-      lists:map(
-        fun(#{Key := KeyValue} = Object) ->
+            end;
+           (Object) when IsTagSelected ->
+            #{Key := KeyValue} = Object,
             Tags = tivan_tags:tags(TagStoreName, KeyValue),
-            Object#{tags => Tags}
+            {true, Object#{tags => Tags}};
+           (Object) -> Object
         end,
-        Objects
-       );
-    _ ->
-      Objects
+        ObjectsU
+       )
   end.
 
 remove_key_if_not_asked(Options, #{key := Key} = TableDef, Objects) ->
   TagsDef = maps:get(tags, TableDef, undefined),
   Selects = maps:get(select, Options, []),
+  Match = maps:get(match, Options, #{}),
   IsTagSelected = Selects == [] orelse lists:member(tags, Selects),
   IsKeySelected = Selects == [] orelse lists:member(Key, Selects),
-  IsTagForMatch = maps:is_key(tags, Options),
+  IsTagForMatch = maps:is_key(tags, Match) orelse maps:is_key('_', Match),
   if
     TagsDef =/= undefined
     , (IsTagSelected or IsTagForMatch)
@@ -668,12 +674,16 @@ expand(Object, #{expand := 0}, _TableDef, _TableDefs) -> Object;
 expand(Object, #{expand := Level}, TableDef, TableDefs) when is_integer(Level) andalso Level > 0 ->
   maps:map(
     fun(Column, Value) ->
-        #{columns := #{Column := #{type := ColumnType}}} = TableDef,
-        ValueExpanded = get_referred_object(ColumnType, Value),
-        case maps:find(ColumnType, TableDefs) of
-          error -> ValueExpanded;
-          {ok, TableDefOfValue} ->
-            expand(ValueExpanded, #{expand => Level - 1}, TableDefOfValue, TableDefs)
+        case TableDef of
+          #{columns := #{Column := #{type := ColumnType}}} ->
+            ValueExpanded = get_referred_object(ColumnType, Value),
+            case maps:find(ColumnType, TableDefs) of
+              error -> ValueExpanded;
+              {ok, TableDefOfValue} ->
+                expand(ValueExpanded, #{expand => Level - 1}, TableDefOfValue, TableDefs)
+            end;
+          _ ->
+            Value
         end
     end,
     Object

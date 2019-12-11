@@ -43,25 +43,32 @@ tags(Name, Entity) ->
                                    ,select => [tag_entity]}),
   [ T || #{tag_entity := {T, _}} <- TagEntities ].
 
-entities(Name, [TagUnknownCase]) ->
-  Tag = string:uppercase(TagUnknownCase),
-  TagEntities = tivan:get(Name, #{match => #{tag_entity => {1, 2, Tag}}
-                                   ,select => [tag_entity]}),
-  [ E || #{tag_entity := {_, E}} <- TagEntities ];
-entities(Name, [Tag|Tags]) ->
-  lists:filter(
-    fun(Entity) ->
-        lists:all(
-          fun(Tu) ->
-              T = string:uppercase(Tu),
-              case tivan:get(Name, {T, Entity}) of
-                [] -> false;
-                _ -> true
-              end
-          end,
-          Tags
-         )
-    end,
-    entities(Name, [Tag])
-   ).
+
+entities(Name, Tags) when is_list(Tags) ->
+  case lists:filtermap(
+         fun(TagUnknownCase) ->
+             Tag = string:uppercase(TagUnknownCase),
+             case tivan:get(Name, #{match => #{tag_entity => {1, 2, Tag}}
+                                    , select => [tag_entity]}) of
+               [] -> false;
+               TagEntities -> {true, [ E || #{tag_entity := {_, E}} <- TagEntities ]}
+             end
+         end,
+         Tags
+        ) of
+    [] -> undefined;
+    [EntityGroup|EntityGroups] ->
+      lists:filter(
+        fun(Entity) ->
+            lists:all(
+              fun(OtherEntityGroup) ->
+                  lists:member(Entity, OtherEntityGroup)
+              end,
+              EntityGroups
+             )
+        end,
+        EntityGroup
+       )
+  end;
+entities(Name, Tag) -> entities(Name, [Tag]).
 
